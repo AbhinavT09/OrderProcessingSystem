@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: com.example.orderprocessing.OrderControllerIntegrationTest
+-------------------------------------------------------------------------------
+Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.384 s -- in com.example.orderprocessing.OrderControllerIntegrationTest
