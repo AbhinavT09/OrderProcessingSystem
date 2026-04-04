@@ -1,23 +1,27 @@
 package com.example.orderprocessing.application.service;
 
 import com.example.orderprocessing.application.event.OrderCreatedEvent;
-import com.example.orderprocessing.application.exception.InfrastructureException;
 import com.example.orderprocessing.application.port.OutboxRepository;
+import com.example.orderprocessing.infrastructure.messaging.schema.OrderCreatedEventSchemaRegistry;
 import com.example.orderprocessing.infrastructure.persistence.entity.OutboxEntity;
 import com.example.orderprocessing.infrastructure.persistence.entity.OutboxStatus;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
+import java.time.Instant;
 import org.springframework.stereotype.Service;
 
 @Service
 public class OutboxService {
 
     private final OutboxRepository outboxRepository;
-    private final ObjectMapper objectMapper;
+    private final OrderCreatedEventSchemaRegistry schemaRegistry;
+    private final int totalPartitions;
 
-    public OutboxService(OutboxRepository outboxRepository, ObjectMapper objectMapper) {
+    public OutboxService(OutboxRepository outboxRepository,
+                         OrderCreatedEventSchemaRegistry schemaRegistry,
+                         @Value("${app.outbox.partition.total:64}") int totalPartitions) {
         this.outboxRepository = outboxRepository;
-        this.objectMapper = objectMapper;
+        this.schemaRegistry = schemaRegistry;
+        this.totalPartitions = Math.max(1, totalPartitions);
     }
 
     public void enqueueOrderCreated(String orderId, OrderCreatedEvent event) {
@@ -25,17 +29,11 @@ public class OutboxService {
         outbox.setAggregateType("ORDER");
         outbox.setAggregateId(orderId);
         outbox.setEventType("OrderCreated");
-        outbox.setPayload(toJson(event));
+        outbox.setPayload(schemaRegistry.serialize(event));
         outbox.setStatus(OutboxStatus.PENDING);
         outbox.setRetryCount(0);
+        outbox.setPartitionKey(Math.floorMod(orderId.hashCode(), totalPartitions));
+        outbox.setNextAttemptAt(Instant.now());
         outboxRepository.save(outbox);
-    }
-
-    private String toJson(OrderCreatedEvent event) {
-        try {
-            return objectMapper.writeValueAsString(event);
-        } catch (JsonProcessingException ex) {
-            throw new InfrastructureException("Failed to serialize OrderCreatedEvent for outbox", ex);
-        }
     }
 }

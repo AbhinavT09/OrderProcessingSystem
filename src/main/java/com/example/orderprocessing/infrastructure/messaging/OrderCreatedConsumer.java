@@ -5,10 +5,9 @@ import com.example.orderprocessing.application.port.OrderRepository;
 import com.example.orderprocessing.application.port.ProcessedEventRepository;
 import com.example.orderprocessing.application.service.OrderMapper;
 import com.example.orderprocessing.domain.model.Order;
+import com.example.orderprocessing.infrastructure.messaging.schema.OrderCreatedEventSchemaRegistry;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import com.example.orderprocessing.infrastructure.persistence.entity.ProcessedEventEntity;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -35,7 +34,7 @@ public class OrderCreatedConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(OrderCreatedConsumer.class);
 
-    private final ObjectMapper objectMapper;
+    private final OrderCreatedEventSchemaRegistry schemaRegistry;
     private final OrderRepository orderRepository;
     private final ProcessedEventRepository processedEventRepository;
     private final OrderMapper orderMapper;
@@ -45,12 +44,12 @@ public class OrderCreatedConsumer {
     private final Counter dlqCounter;
     private final DistributionSummary kafkaLagMsSummary;
 
-    public OrderCreatedConsumer(ObjectMapper objectMapper,
+    public OrderCreatedConsumer(OrderCreatedEventSchemaRegistry schemaRegistry,
                                 OrderRepository orderRepository,
                                 ProcessedEventRepository processedEventRepository,
                                 OrderMapper orderMapper,
                                 MeterRegistry meterRegistry) {
-        this.objectMapper = objectMapper;
+        this.schemaRegistry = schemaRegistry;
         this.orderRepository = orderRepository;
         this.processedEventRepository = processedEventRepository;
         this.orderMapper = orderMapper;
@@ -162,10 +161,6 @@ public class OrderCreatedConsumer {
     }
 
     private OrderCreatedEvent parse(String payload) {
-        try {
-            return objectMapper.readValue(payload, OrderCreatedEvent.class);
-        } catch (JsonProcessingException ex) {
-            throw new IllegalArgumentException("Invalid OrderCreatedEvent payload", ex);
-        }
+        return schemaRegistry.deserialize(payload);
     }
 }

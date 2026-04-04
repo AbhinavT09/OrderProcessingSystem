@@ -38,6 +38,24 @@ Real-world example:
 
 - Consumer crashes after processing but before offset commit on one instance; re-delivery occurs, dedupe check prevents double-processing.
 
+### Schema evolution layer (`VersionedJsonOrderCreatedEventSchemaRegistry`)
+
+- Central contract authority for event shape/validation.
+- Ensures producer and consumer use the same compatibility rules.
+
+Real-world example:
+
+- Region A deploys with schema v2 while Region B still processes v1 payloads; events continue to parse because `schemaVersion` is backward/forward compatible by design.
+
+### Multi-region resilience layer (`RegionalFailoverManager` + `GlobalIdempotencyService`)
+
+- Failover manager monitors DB/Redis/Kafka health and toggles write mode in active-passive setups.
+- Global idempotency lock/resolution reduces duplicate creates when traffic shifts regions.
+
+Real-world example:
+
+- During DNS failover, client retries same create request to secondary region. Global idempotency mapping returns original `orderId` instead of creating a duplicate.
+
 ## Tooling rationale (accurate to current implementation)
 
 ### Spring Boot
@@ -51,9 +69,11 @@ Real-world example:
 
 ### Spring Data Redis (Lettuce)
 - Distributed cache and distributed rate limiter state store.
+- HA options: cluster/sentinel, reconnect, pool tuning, and timeout controls.
 
 ### Kafka + Spring Kafka
 - Durable async event pipeline, consumer groups, retry topics, DLQ.
+- Supports schema-versioned JSON event contracts through a dedicated registry abstraction.
 
 ### Spring Retry
 - Complements transient failure handling patterns.
@@ -63,6 +83,7 @@ Real-world example:
 
 ### Micrometer + Prometheus
 - Unified instrumentation for business + infra metrics.
+- Tracks schema validation, version distribution, regional traffic, and failover events.
 
 ### OpenTelemetry (Micrometer bridge)
 - Trace export to OTLP endpoint for distributed diagnostics.
@@ -75,6 +96,7 @@ Real-world example:
 ### Redis cache failure
 - Tool behavior: exceptions caught inside `RedisCacheProvider`.
 - Outcome: fallback to DB read path.
+- Additional behavior: circuit breaker opens after repeated failures to reduce hot-path latency impact.
 
 ### Redis rate limiter failure
 - Tool behavior: limiter fail-open with warning log.
@@ -87,6 +109,14 @@ Real-world example:
 ### Kafka consumer duplicate delivery
 - Tool behavior: processed-event dedupe check first.
 - Outcome: duplicate message skipped safely.
+
+### Schema validation failure
+- Tool behavior: registry rejects invalid payload and increments `kafka.schema.validation.errors`.
+- Outcome: bad event does not mutate domain state.
+
+### Regional failover
+- Tool behavior: failover manager transitions node to passive on sustained dependency failure.
+- Outcome: write APIs are blocked until region health is restored.
 
 ### DB optimistic lock conflict
 - Tool behavior: version mismatch triggers conflict exception.

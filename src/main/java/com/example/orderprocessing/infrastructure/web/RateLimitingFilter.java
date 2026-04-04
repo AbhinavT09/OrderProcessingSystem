@@ -4,6 +4,7 @@ import com.example.orderprocessing.api.error.ApiError;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -65,6 +66,8 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     private final ObjectMapper objectMapper;
     private final Counter allowedCounter;
     private final Counter blockedCounter;
+    private final Counter redisConnectionFailures;
+    private final Timer redisCommandLatency;
     private final int requestsPerWindow;
     private final long windowMs;
     private final double refillPerMs;
@@ -79,6 +82,8 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         this.objectMapper = objectMapper;
         this.allowedCounter = meterRegistry.counter("rate_limit.allowed.count");
         this.blockedCounter = meterRegistry.counter("rate_limit.blocked.count");
+        this.redisConnectionFailures = meterRegistry.counter("redis.connection.failures", "component", "rate_limiter");
+        this.redisCommandLatency = meterRegistry.timer("redis.command.latency", "command", "evalsha", "component", "rate_limiter");
         this.requestsPerWindow = requestsPerWindow;
         this.windowMs = windowMs;
         this.refillPerMs = windowMs <= 0 ? 0D : ((double) requestsPerWindow) / (double) windowMs;
@@ -114,17 +119,18 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         long nowMs = System.currentTimeMillis();
         long ttlMs = Math.max(windowMs * KEY_TTL_MULTIPLIER, windowMs);
         try {
-            Long allowed = redisTemplate.execute(
+            Long allowed = redisCommandLatency.record(() -> redisTemplate.execute(
                     tokenBucketScript,
                     Collections.singletonList(key),
                     String.valueOf(nowMs),
                     String.valueOf(requestsPerWindow),
                     String.valueOf(refillPerMs),
                     String.valueOf(REQUEST_TOKENS),
-                    String.valueOf(ttlMs));
+                    String.valueOf(ttlMs)));
             return allowed != null && allowed == 1L;
         } catch (RuntimeException ex) {
             // Fail-open to protect API availability if Redis is degraded.
+            redisConnectionFailures.increment();
             log.warn("Redis rate limiting failure key={} reason={}", key, ex.toString());
             return true;
         }

@@ -7,6 +7,7 @@ import com.example.orderprocessing.domain.model.OrderStatus;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderItemEmbeddable;
 import com.example.orderprocessing.infrastructure.persistence.entity.ProcessedEventEntity;
+import com.example.orderprocessing.infrastructure.messaging.schema.VersionedJsonOrderCreatedEventSchemaRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
@@ -31,12 +32,15 @@ class OrderCreatedConsumerUnitTest {
         orderRepository.save(buildOrder(orderId, OrderStatus.PENDING));
 
         InMemoryProcessedEventRepository processedRepository = new InMemoryProcessedEventRepository();
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         OrderCreatedConsumer consumer = new OrderCreatedConsumer(
-                new ObjectMapper(),
+                new VersionedJsonOrderCreatedEventSchemaRegistry(
+                        new ObjectMapper(),
+                        meterRegistry),
                 orderRepository,
                 processedRepository,
                 new OrderMapper(),
-                new SimpleMeterRegistry());
+                meterRegistry);
 
         String payload = """
                 {

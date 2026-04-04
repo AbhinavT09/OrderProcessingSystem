@@ -10,6 +10,9 @@ Production-ready Java Spring Boot backend for e-commerce order processing.
 - Optimistic locking for concurrent updates
 - JWT authentication and role-based authorization
 - Request validation, rate limiting, structured logging, metrics, and tracing
+- Redis HA options (cluster/sentinel), circuit breaker, and TTL jitter
+- Versioned Kafka event schema (`schemaVersion`) with compatibility validation
+- Multi-region DR scaffolding (regional failover manager, global idempotency, region-aware telemetry)
 
 ## Tech Stack
 - Java 17, Spring Boot 3

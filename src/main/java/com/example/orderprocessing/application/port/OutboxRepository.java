@@ -2,6 +2,7 @@ package com.example.orderprocessing.application.port;
 
 import com.example.orderprocessing.infrastructure.persistence.entity.OutboxEntity;
 import com.example.orderprocessing.infrastructure.persistence.entity.OutboxStatus;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -10,4 +11,8 @@ public interface OutboxRepository {
     List<OutboxEntity> findTop100ByStatusInOrderByCreatedAtAsc(List<OutboxStatus> statuses);
     long countByStatus(OutboxStatus status);
     boolean existsByIdAndStatus(UUID id, OutboxStatus status);
+    List<OutboxEntity> claimBatchForPartition(int partitionKey, Instant now, int maxRetries, int batchSize);
+    List<OutboxEntity> findSentOlderThan(Instant cutoff);
+    void saveArchiveBatch(List<OutboxEntity> sentEventsToArchive, Instant archivedAt);
+    void deleteBatch(List<OutboxEntity> sentEventsToDelete);
 }

@@ -4,12 +4,15 @@ import com.example.orderprocessing.api.dto.CreateOrderRequest;
 import com.example.orderprocessing.api.dto.OrderResponse;
 import com.example.orderprocessing.application.event.OrderCreatedEvent;
 import com.example.orderprocessing.application.exception.ConflictException;
+import com.example.orderprocessing.application.exception.InfrastructureException;
 import com.example.orderprocessing.application.exception.NotFoundException;
 import com.example.orderprocessing.application.port.CacheProvider;
 import com.example.orderprocessing.application.port.OrderRepository;
 import com.example.orderprocessing.domain.model.Order;
 import com.example.orderprocessing.domain.model.OrderStatus;
+import com.example.orderprocessing.infrastructure.idempotency.GlobalIdempotencyService;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
+import com.example.orderprocessing.infrastructure.resilience.RegionalFailoverManager;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -33,6 +36,8 @@ public class OrderService {
     private final CacheProvider cacheProvider;
     private final OutboxService outboxService;
     private final OrderMapper mapper;
+    private final GlobalIdempotencyService globalIdempotencyService;
+    private final RegionalFailoverManager failoverManager;
     private final Counter createCounter;
     private final Counter requestCounter;
     private final Counter idempotentHitCounter;
@@ -43,11 +48,15 @@ public class OrderService {
                         CacheProvider cacheProvider,
                         OutboxService outboxService,
                         OrderMapper mapper,
+                        GlobalIdempotencyService globalIdempotencyService,
+                        RegionalFailoverManager failoverManager,
                         MeterRegistry meterRegistry) {
         this.orderRepository = orderRepository;
         this.cacheProvider = cacheProvider;
         this.outboxService = outboxService;
         this.mapper = mapper;
+        this.globalIdempotencyService = globalIdempotencyService;
+        this.failoverManager = failoverManager;
         this.requestCounter = meterRegistry.counter("orders.service.request.count");
         this.createCounter = meterRegistry.counter("orders.created.count");
         this.idempotentHitCounter = meterRegistry.counter("orders.idempotency.hit.count");
@@ -57,9 +66,28 @@ public class OrderService {
 
     @Transactional
     public OrderResponse createOrder(CreateOrderRequest request, String idempotencyKey) {
+        assertWriteAllowed();
         requestCounter.increment();
         return operationTimer.record(() -> {
             String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
+            String idempotencyOwner = UUID.randomUUID().toString();
+
+            if (normalizedIdempotencyKey != null) {
+                UUID globalOrderId = globalIdempotencyService.resolveCompletedOrderId(normalizedIdempotencyKey).orElse(null);
+                if (globalOrderId != null) {
+                    OrderEntity existingGlobal = orderRepository.findById(globalOrderId).orElse(null);
+                    if (existingGlobal != null) {
+                        idempotentHitCounter.increment();
+                        log.info("Global idempotent order create hit key={} orderId={}",
+                                normalizedIdempotencyKey, existingGlobal.getId());
+                        return mapper.toResponse(mapper.toDomain(existingGlobal));
+                    }
+                }
+                if (!globalIdempotencyService.tryAcquire(normalizedIdempotencyKey, idempotencyOwner)) {
+                    throw new ConflictException("Duplicate request in progress for idempotency key");
+                }
+            }
+
             if (normalizedIdempotencyKey != null) {
                 OrderEntity existing = orderRepository.findByIdempotencyKey(normalizedIdempotencyKey).orElse(null);
                 if (existing != null) {
@@ -76,12 +104,14 @@ public class OrderService {
                 MDC.put("order_id", saved.getId().toString());
 
                 OrderCreatedEvent createdEvent = new OrderCreatedEvent(
+                        2,
                         UUID.randomUUID().toString(),
                         "ORDER_CREATED",
                         saved.getId().toString(),
                         Instant.now().toString());
                 outboxService.enqueueOrderCreated(saved.getId().toString(), createdEvent);
                 invalidateStatusCaches();
+                globalIdempotencyService.markCompleted(normalizedIdempotencyKey, saved.getId());
 
                 createCounter.increment();
                 log.info("Order created orderId={} status={} idempotencyKey={}",
@@ -105,6 +135,7 @@ public class OrderService {
 
     @Transactional
     public OrderResponse updateStatus(UUID id, OrderStatus status, Long expectedVersion) {
+        assertWriteAllowed();
         requestCounter.increment();
         return operationTimer.record(() -> {
             MDC.put("order_id", id.toString());
@@ -139,6 +170,7 @@ public class OrderService {
 
     @Transactional
     public OrderResponse cancel(UUID id) {
+        assertWriteAllowed();
         requestCounter.increment();
         return operationTimer.record(() -> {
             MDC.put("order_id", id.toString());
@@ -198,5 +230,11 @@ public class OrderService {
         }
         String trimmed = idempotencyKey.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private void assertWriteAllowed() {
+        if (!failoverManager.allowsWrites()) {
+            throw new InfrastructureException("Region in passive mode; writes are temporarily disabled", null);
+        }
     }
 }

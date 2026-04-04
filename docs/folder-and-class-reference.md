@@ -34,6 +34,8 @@ This is a class-by-class implementation reference for the current codebase.
 - Optimistic locking conflict checks
 - Writes outbox records (no direct Kafka publish)
 - Cache invalidation on writes
+- Enforces regional write policy via failover manager
+- Uses global idempotency mapping for cross-region duplicate protection
 
 #### `OrderQueryService`
 - Read-side orchestration
@@ -45,7 +47,7 @@ This is a class-by-class implementation reference for the current codebase.
 - Maps API DTOs <-> domain <-> entities
 
 #### `OutboxService`
-- Serializes event payload and persists `OutboxEntity`
+- Serializes event payload via schema registry and persists `OutboxEntity`
 
 ### Ports
 
@@ -93,23 +95,27 @@ This is a class-by-class implementation reference for the current codebase.
 - Redis JSON cache implementation
 - Metrics: hit/miss/error
 - Fail-safe fallback behavior
+- Redis circuit breaker + TTL jitter + command latency metrics
 
 ### Messaging
 
 #### `KafkaEventPublisher`
 - Outbound Kafka adapter
 - Retries + circuit breaker
+- Delegates schema validation/serialization to central schema registry
 
 #### `OutboxPublisher`
 - Scheduled outbox dispatcher
 - Exponential backoff + max retry
-- Metrics: pending/failure/publish latency
+- Metrics: pending/failure/publish latency/batch size/publish rate/lag/retry
+- Partition-aware parallel workers and archive cleanup
 
 #### `OrderCreatedConsumer`
 - Kafka consumer with retry-topic strategy
 - Manual offset acknowledgment
 - Idempotent consume via processed-events table
 - DLQ enriched logging + metrics
+- Versioned schema parse/validation fallback
 
 #### `KafkaConsumerRebalanceObserver`
 - Emits logs for consumer lifecycle and partition pause/resume
@@ -119,6 +125,18 @@ This is a class-by-class implementation reference for the current codebase.
 
 #### `RetryableProcessingException`
 - Signals transient processing retry path
+
+### Messaging schema
+
+#### `schema/OrderCreatedEventSchemaRegistry`
+- Abstraction for event schema handling.
+
+#### `schema/VersionedJsonOrderCreatedEventSchemaRegistry`
+- Current implementation for versioned JSON schema contracts.
+- Handles backward/forward-compatible parse and validation.
+
+#### `schema/EventSchemaValidationException`
+- Raised for invalid event contracts.
 
 ### Persistence
 
@@ -138,6 +156,10 @@ This is a class-by-class implementation reference for the current codebase.
 - `ProcessedEventEntity`
 - `OutboxEntity`
 - `OutboxStatus`
+- `OutboxArchiveEntity`
+
+#### Additional repositories
+- `SpringOutboxArchiveJpaRepository`
 
 ### Security
 
@@ -147,7 +169,7 @@ This is a class-by-class implementation reference for the current codebase.
 ### Web filters
 
 #### `RequestContextFilter`
-- Request ID propagation and HTTP metrics
+- Request ID + region ID propagation and region-aware HTTP metrics
 
 #### `RateLimitingFilter`
 - Redis Lua token-bucket limiter
@@ -166,10 +188,23 @@ This is a class-by-class implementation reference for the current codebase.
 
 ### `application.yml`
 - Datasource/JPA
-- Redis host/port/timeout
+- Redis host/port/timeout + cluster/sentinel/pool/HA settings
 - Kafka listener/publisher/retry settings
 - Outbox scheduler/retry settings
 - Cache TTL settings
 - Security + rate-limit settings
 - Actuator/tracing/metrics/logging settings
+- Multi-region failover/RTO/RPO/global-idempotency settings
+
+### Resilience
+
+#### `infrastructure/resilience/RegionalFailoverManager`
+- Periodic DB/Redis/Kafka health checks.
+- Active/passive node-state transitions for DR protection.
+
+#### `infrastructure/resilience/MultiRegionHealthIndicator`
+- Exposes multi-region state on actuator health endpoints.
+
+#### `infrastructure/idempotency/GlobalIdempotencyService`
+- Redis-based global key lock + completion mapping.
 

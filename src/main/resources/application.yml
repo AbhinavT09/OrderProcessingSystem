@@ -13,21 +13,81 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       timeout: ${REDIS_TIMEOUT:2s}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
+      cluster:
+        nodes: ${REDIS_CLUSTER_NODES:}
+        max-redirects: ${REDIS_CLUSTER_MAX_REDIRECTS:3}
+      sentinel:
+        master: ${REDIS_SENTINEL_MASTER:}
+        nodes: ${REDIS_SENTINEL_NODES:}
+      lettuce:
+        pool:
+          enabled: true
+          max-active: ${REDIS_POOL_MAX_ACTIVE:32}
+          max-idle: ${REDIS_POOL_MAX_IDLE:16}
+          min-idle: ${REDIS_POOL_MIN_IDLE:4}
+          max-wait: ${REDIS_POOL_MAX_WAIT:2s}
   kafka:
     bootstrap-servers: localhost:9092
     listener:
       ack-mode: manual_immediate
 
+  # Multi-region DB strategy scaffold: primary + replica with async cross-region replication.
+  # Wire these values in your platform (Aurora Global DB, Cloud SQL cross-region replica, etc).
+  datasource-dr:
+    primary-region: ${DB_PRIMARY_REGION:region-a}
+    replica-region: ${DB_REPLICA_REGION:region-b}
+    failover-enabled: ${DB_FAILOVER_ENABLED:true}
+    cross-region-replication: ${DB_CROSS_REGION_REPLICATION:async}
+
 app:
+  multi-region:
+    enabled: ${MULTI_REGION_ENABLED:false}
+    region-id: ${REGION_ID:region-a}
+    traffic-routing:
+      strategy: ${TRAFFIC_ROUTING_STRATEGY:dns-latency}
+    failover:
+      mode: ${FAILOVER_MODE:active-passive}
+      rto-seconds: ${FAILOVER_RTO_SECONDS:60}
+      rpo-seconds: ${FAILOVER_RPO_SECONDS:30}
+    auto-failover:
+      enabled: ${AUTO_FAILOVER_ENABLED:true}
+      poll-ms: ${AUTO_FAILOVER_POLL_MS:5000}
+      unhealthy-threshold: ${AUTO_FAILOVER_UNHEALTHY_THRESHOLD:3}
+    consistency:
+      level: eventual
+      conflict-resolution: ${CONFLICT_RESOLUTION:last-write-wins}
+    global-idempotency:
+      enabled: ${GLOBAL_IDEMPOTENCY_ENABLED:true}
+      lock-ttl-seconds: ${GLOBAL_IDEMPOTENCY_LOCK_TTL_SECONDS:60}
+      completed-ttl-seconds: ${GLOBAL_IDEMPOTENCY_COMPLETED_TTL_SECONDS:86400}
   cache:
     ttl:
       order-by-id-seconds: 300
       order-list-seconds: 60
+      jitter-max-percent: 0.2
+    redis:
+      geo-replication-enabled: ${REDIS_GEO_REPLICATION_ENABLED:false}
+      regional-clusters: ${REDIS_REGIONAL_CLUSTERS:region-a,region-b}
+      circuit-breaker:
+        failure-threshold: 5
+        cooldown-ms: 30000
   outbox:
     max-retries: 12
     backoff-base-ms: 1000
+    partition:
+      total: 64
+      instance-id: ${OUTBOX_INSTANCE_ID:0}
+      instance-count: ${OUTBOX_INSTANCE_COUNT:1}
+    cleanup:
+      retention-days: 7
+      poll-ms: 60000
     publisher:
       poll-ms: 2000
+      batch-size: 200
+      parallelism: 8
+      max-in-flight: 16
+      slow-kafka-threshold-ms: 1500
   security:
     jwt-secret: ${JWT_SECRET:change-me-to-a-strong-32-char-secret}
     rate-limit:
@@ -36,6 +96,13 @@ app:
   kafka:
     order-events-topic: order.events
     consumer-group: order-processing-group
+    multi-cluster:
+      enabled: ${KAFKA_MULTI_CLUSTER_ENABLED:false}
+      local-cluster: ${KAFKA_LOCAL_CLUSTER:region-a}
+      remote-cluster: ${KAFKA_REMOTE_CLUSTER:region-b}
+      replication:
+        strategy: ${KAFKA_REPLICATION_STRATEGY:mirrormaker2}
+        topic-pattern: ${KAFKA_REPLICATION_TOPICS:order.events.*}
     processing-delay-ms: 300000
     processing-delay-multiplier: 2.0
     processing-delay-max-ms: 3600000
@@ -57,6 +124,12 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  health:
+    redis:
+      enabled: true
   metrics:
     distribution:
       percentiles:
@@ -67,6 +140,6 @@ management:
 
 logging:
   pattern:
-    console: "{\"timestamp\":\"%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}\",\"level\":\"%p\",\"logger\":\"%logger{36}\",\"message\":\"%msg\",\"request_id\":\"%X{request_id:-na}\",\"order_id\":\"%X{order_id:-na}\",\"trace_id\":\"%X{traceId:-na}\"}%n"
+    console: "{\"timestamp\":\"%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}\",\"level\":\"%p\",\"logger\":\"%logger{36}\",\"message\":\"%msg\",\"request_id\":\"%X{request_id:-na}\",\"region_id\":\"%X{region_id:-na}\",\"order_id\":\"%X{order_id:-na}\",\"trace_id\":\"%X{traceId:-na}\"}%n"
   level:
     com.example.orderprocessing: INFO

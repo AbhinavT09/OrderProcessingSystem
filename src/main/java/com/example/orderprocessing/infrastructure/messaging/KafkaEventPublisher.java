@@ -3,8 +3,7 @@ package com.example.orderprocessing.infrastructure.messaging;
 import com.example.orderprocessing.application.event.OrderCreatedEvent;
 import com.example.orderprocessing.application.exception.InfrastructureException;
 import com.example.orderprocessing.application.port.EventPublisher;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.orderprocessing.infrastructure.messaging.schema.OrderCreatedEventSchemaRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -20,7 +19,7 @@ public class KafkaEventPublisher implements EventPublisher {
     private static final Logger log = LoggerFactory.getLogger(KafkaEventPublisher.class);
 
     private final KafkaTemplate<String, String> kafkaTemplate;
-    private final ObjectMapper objectMapper;
+    private final OrderCreatedEventSchemaRegistry schemaRegistry;
     private final String topic;
     private final int maxRetries;
     private final long retryBackoffMs;
@@ -32,14 +31,14 @@ public class KafkaEventPublisher implements EventPublisher {
 
     public KafkaEventPublisher(
             KafkaTemplate<String, String> kafkaTemplate,
-            ObjectMapper objectMapper,
+            OrderCreatedEventSchemaRegistry schemaRegistry,
             @Value("${app.kafka.order-events-topic:order.events}") String topic,
             @Value("${app.kafka.publisher.max-retries:3}") int maxRetries,
             @Value("${app.kafka.publisher.retry-backoff-ms:300}") long retryBackoffMs,
             @Value("${app.kafka.publisher.circuit-breaker.failure-threshold:5}") int failureThreshold,
             @Value("${app.kafka.publisher.circuit-breaker.open-seconds:20}") long openSeconds) {
         this.kafkaTemplate = kafkaTemplate;
-        this.objectMapper = objectMapper;
+        this.schemaRegistry = schemaRegistry;
         this.topic = topic;
         this.maxRetries = maxRetries;
         this.retryBackoffMs = retryBackoffMs;
@@ -53,7 +52,7 @@ public class KafkaEventPublisher implements EventPublisher {
             throw new InfrastructureException("Kafka circuit breaker is OPEN", null);
         }
 
-        String payload = toJson(event);
+        String payload = schemaRegistry.serialize(event);
         int attempts = 0;
         Exception lastException = null;
 
@@ -77,14 +76,6 @@ public class KafkaEventPublisher implements EventPublisher {
         }
 
         throw new InfrastructureException("Kafka publish failed after retries for orderId=" + event.orderId(), lastException);
-    }
-
-    private String toJson(OrderCreatedEvent event) {
-        try {
-            return objectMapper.writeValueAsString(event);
-        } catch (JsonProcessingException ex) {
-            throw new InfrastructureException("Failed to serialize OrderCreatedEvent", ex);
-        }
     }
 
     private boolean isCircuitOpen() {

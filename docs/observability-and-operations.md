@@ -6,6 +6,7 @@ Structured JSON logging includes:
 
 - `timestamp`, `level`, `logger`, `message`
 - `request_id` from `RequestContextFilter`
+- `region_id` from `RequestContextFilter`
 - `order_id` from service-level MDC context
 - `trace_id` from tracing context
 
@@ -18,6 +19,7 @@ Structured JSON logging includes:
 - `http.server.request.count`
 - `http.server.request.latency` (p95, p99)
 - `http.server.request.errors`
+- `http.server.requests.by.region`
 
 ### Business/service metrics
 
@@ -35,6 +37,9 @@ Structured JSON logging includes:
 - `cache.hit.count`
 - `cache.miss.count`
 - `cache.error.count`
+- `cache.degraded.mode.count`
+- `redis.connection.failures` (tagged by component)
+- `redis.command.latency` (tagged by command/component)
 
 ### Rate limiting metrics
 
@@ -46,6 +51,10 @@ Structured JSON logging includes:
 - `outbox.pending.count`
 - `outbox.failure.count`
 - `outbox.publish.latency`
+- `outbox.batch.size`
+- `outbox.publish.rate`
+- `outbox.lag`
+- `outbox.retry.count`
 
 ### Kafka consumer metrics
 
@@ -54,6 +63,13 @@ Structured JSON logging includes:
 - `kafka.consumer.processed.count`
 - `kafka.consumer.retry.count`
 - `kafka.consumer.dlq.count`
+- `kafka.schema.validation.errors`
+- `kafka.event.version.distribution`
+
+### Regional resilience metrics
+
+- `failover.events.count`
+- `region.health.unhealthy.count`
 
 ## 3) Tracing
 
@@ -72,6 +88,8 @@ Use traces + request_id for end-to-end debugging.
 - Exponential backoff based on retry count
 - Bounded retries (max retries)
 - `SENT` / `FAILED` state transitions tracked in DB
+- Parallel, partition-aware workers with `SKIP LOCKED` row claiming
+- Cleanup moves old `SENT` records to archive table
 
 ### Kafka consumer
 
@@ -79,6 +97,7 @@ Use traces + request_id for end-to-end debugging.
 - Ack only after safe completion
 - Retry topics with exponential backoff and max attempts
 - DLQ handler for terminal failures
+- Versioned schema parsing with fallback compatibility logic
 
 ## 5) DLQ operations guidance
 
@@ -112,6 +131,7 @@ Action:
 Symptoms:
 
 - rising `cache.error.count`
+- rising `cache.degraded.mode.count`
 - possibly rising DB read load
 
 Action:
@@ -144,6 +164,20 @@ Action:
 - verify retry bounds and delay settings
 - scale consumers / fix downstream dependency
 
+### Scenario: regional failover event
+
+Symptoms:
+
+- `failover.events.count` increments
+- increased 503 on write endpoints in passive node
+- request logs include impacted `region_id`
+
+Action:
+
+1. Validate root cause (DB/Redis/Kafka health in region).
+2. Confirm global traffic router moved writes to healthy region.
+3. Track recovery and verify node returns active state.
+
 ## 7) Runbook checkpoints
 
 - Verify Kafka connectivity and topic health.
@@ -151,4 +185,5 @@ Action:
 - Verify Prometheus scraping `/actuator/prometheus`.
 - Verify trace export endpoint and sampling settings.
 - Verify outbox backlog and DLQ trends on deployments.
+- Verify regional health and failover mode in `/actuator/health` (`multiRegion`).
 

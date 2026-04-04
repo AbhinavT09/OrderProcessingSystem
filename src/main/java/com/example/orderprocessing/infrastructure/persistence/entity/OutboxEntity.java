@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -12,7 +13,10 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "outbox_events")
+@Table(name = "outbox_events", indexes = {
+        @Index(name = "idx_outbox_partition_status_next_attempt", columnList = "partitionKey,status,nextAttemptAt"),
+        @Index(name = "idx_outbox_created_at", columnList = "createdAt")
+})
 public class OutboxEntity {
 
     @Id
@@ -38,6 +42,12 @@ public class OutboxEntity {
     private Integer retryCount;
 
     @Column(nullable = false)
+    private Integer partitionKey;
+
+    @Column(nullable = false)
+    private Instant nextAttemptAt;
+
+    @Column(nullable = false)
     private Instant createdAt;
 
     @Column(nullable = false)
@@ -52,8 +62,14 @@ public class OutboxEntity {
         if (retryCount == null) {
             retryCount = 0;
         }
+        if (partitionKey == null) {
+            partitionKey = 0;
+        }
         if (status == null) {
             status = OutboxStatus.PENDING;
+        }
+        if (nextAttemptAt == null) {
+            nextAttemptAt = now;
         }
         if (createdAt == null) {
             createdAt = now;
@@ -128,6 +144,22 @@ public class OutboxEntity {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Integer getPartitionKey() {
+        return partitionKey;
+    }
+
+    public void setPartitionKey(Integer partitionKey) {
+        this.partitionKey = partitionKey;
+    }
+
+    public Instant getNextAttemptAt() {
+        return nextAttemptAt;
+    }
+
+    public void setNextAttemptAt(Instant nextAttemptAt) {
+        this.nextAttemptAt = nextAttemptAt;
     }
 
     public Instant getUpdatedAt() {

@@ -18,6 +18,11 @@
 - `OrderCreatedConsumerUnitTest`
 - Verifies delayed promotion and processed-marker write.
 
+### Multi-region and resilience tests (recommended additions)
+- Failover manager state transition test (`active -> passive -> active`)
+- Write gating test when node state is passive
+- Global idempotency lock/resolve behavior test
+
 ## Failure-oriented test recommendations (next additions)
 
 To fully mirror runtime resilience, add:
@@ -41,10 +46,22 @@ To fully mirror runtime resilience, add:
    - ID cache uses 5 min TTL
    - list cache uses 1 min TTL
 
+6. **Schema evolution tests**
+   - v1 payload without `schemaVersion` still processes
+   - v2 payload validates and publishes
+   - future version + optional fields remains parseable
+   - missing required fields fail validation with metric increment
+
+7. **Regional behavior tests**
+   - region-aware `X-Region-Id` propagation in `RequestContextFilter`
+   - `http.server.requests.by.region` metric increments
+   - `failover.events.count` increments on state switch
+
 ## Quality principles
 
 - Correctness-first writes (idempotency + optimistic locking + outbox)
 - Eventual consistency for async transitions with bounded retries
 - Degrade gracefully on cache/redis outages
 - Observable by default (logs/metrics/traces)
+- Region-aware operations and deterministic failover behavior
 

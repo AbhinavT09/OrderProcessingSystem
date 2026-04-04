@@ -6,7 +6,7 @@ The project uses **Hexagonal Architecture + CQRS + DDD Aggregate**:
 
 - **Domain layer:** business invariants and state transitions only
 - **Application layer:** use-case orchestration and ports
-- **Infrastructure layer:** Kafka, Redis, persistence, filters, security adapters
+- **Infrastructure layer:** Kafka, Redis, persistence, filters, security adapters, resilience/idempotency modules
 - **API layer:** HTTP transport + DTO + exception mapping
 
 CQRS split:
@@ -84,7 +84,25 @@ No Kafka call occurs inside this transaction.
 - DLQ handler with rich context logging (topic/partition/offset/event ids)
 - Rebalance lifecycle visibility via `KafkaConsumerRebalanceObserver`
 
-## 7) Distributed Redis design
+## 7) Kafka schema evolution strategy
+
+The system uses **versioned JSON schema registry abstraction**:
+
+- `OrderCreatedEvent` includes `schemaVersion`
+- `VersionedJsonOrderCreatedEventSchemaRegistry` centralizes:
+  - serialization
+  - deserialization
+  - required-field validation
+  - backward compatibility (v1 payloads without `schemaVersion`)
+  - forward compatibility (unknown optional fields tolerated)
+- Validation failures emit schema metrics and reject invalid payloads before publish/process
+
+Compatibility rules enforced:
+
+- Allowed: adding optional fields
+- Not allowed: removing required fields (`eventId`, `eventType`, `orderId`, `occurredAt`)
+
+## 8) Distributed Redis design
 
 ### Cache
 
@@ -94,6 +112,8 @@ No Kafka call occurs inside this transaction.
   - order list = 1 min
 - Fail-safe behavior: cache failures log and fallback to DB path
 - Stampede protection retained in `OrderQueryService` with key locks
+- Circuit breaker disables cache calls during repeated Redis failure windows
+- TTL jitter reduces synchronized expiry spikes
 
 ### Rate limiting
 
@@ -101,15 +121,33 @@ No Kafka call occurs inside this transaction.
 - Key format: `userId:path:ip`
 - Works across multiple service instances
 - Atomic operation prevents races under concurrency
+- Fail-open strategy keeps API available during Redis outages
+- HA-ready config supports Redis Cluster or Sentinel setup
 
-## 8) Security architecture
+## 9) Multi-region and disaster recovery architecture
+
+Core controls added:
+
+- `RegionalFailoverManager` for dependency health checks (DB, Redis, Kafka)
+- health-triggered node-state transitions for active-passive strategy
+- `OrderService` write gating when region is passive
+- `GlobalIdempotencyService` to reduce duplicate creates during regional failover/retry races
+- `MultiRegionHealthIndicator` for actuator visibility
+- `region_id` propagation in request context/logs/metrics
+
+RTO/RPO are explicit config values:
+
+- `app.multi-region.failover.rto-seconds`
+- `app.multi-region.failover.rpo-seconds`
+
+## 10) Security architecture
 
 - JWT stateless auth
 - `roles` claim -> `ROLE_*` authorities
 - Endpoint-level RBAC in `SecurityConfig`
 - Request correlation (`request_id`) and API error normalization
 
-## 9) Real-world failure case walkthroughs
+## 11) Real-world failure case walkthroughs
 
 ### Case A: Kafka publish outage during order creation
 
@@ -142,7 +180,14 @@ No Kafka call occurs inside this transaction.
 - Manual ack only after successful processing
 - Unacked records can be reassigned/retried safely
 
-## 10) Architecture-level failure matrix
+### Case F: Regional dependency degradation
+
+- Regional health monitor detects repeated DB/Redis/Kafka failures
+- Node shifts to passive mode for active-passive deployments
+- Write APIs reject requests until health stabilizes
+- Prevents unsafe split-brain writes
+
+## 12) Architecture-level failure matrix
 
 | Failure | Protection | Result |
 |---|---|---|
@@ -153,4 +198,6 @@ No Kafka call occurs inside this transaction.
 | Rate limiter Redis failure | fail-open + log | availability preserved |
 | Concurrent updates | optimistic lock + version check | conflict response |
 | Retry storm risk | bounded retry attempts + DLQ | no infinite loops |
+| Regional dependency failures | automatic passive mode switch | write safety over availability |
+| Schema-invalid event payload | schema validation reject + metric | bad event blocked early |
 
