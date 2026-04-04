@@ -103,7 +103,7 @@ Real-world example:
 - Outcome: availability preserved, but throttling temporarily relaxed.
 
 ### Kafka producer failure
-- Tool behavior: outbox keeps event pending/failed with retries.
+- Tool behavior: `KafkaEventPublisher` performs async single-attempt send and surfaces failure to outbox; outbox keeps event pending/failed with retries.
 - Outcome: eventual publish once dependency recovers.
 
 ### Kafka consumer duplicate delivery

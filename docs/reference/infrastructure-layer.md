@@ -11,6 +11,8 @@
 ### Kafka async publisher and circuit-breaker
 - `KafkaEventPublisher` validates/serializes through `OrderCreatedEventSchemaRegistry` before send.
 - Per-order key serialization is preserved via `keyPublishChains` map to avoid reordering for same aggregate key.
+- Publisher path is non-blocking callback-driven; it does not perform local blocking waits.
+- Retry ownership is centralized in outbox (`OutboxRetryHandler`), not in `KafkaEventPublisher`.
 - Circuit opens after `failure-threshold` consecutive send failures; open window controlled by `open-seconds`; publishes fail fast while open.
 
 ### Consumer transaction boundary hardening

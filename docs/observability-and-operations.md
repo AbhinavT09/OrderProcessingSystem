@@ -88,6 +88,7 @@ Use traces + request_id for end-to-end debugging.
 - Fetcher claims rows in transaction, records `outbox.batch.size`, and preserves deterministic aggregate ordering.
 - Processor performs async publish, tracks publish latency/rate/lag, and marks `SENT` on completion.
 - Retry handler updates retry count, computes exponential delay with cap, and parks terminal failures when max retries are exhausted.
+- Kafka publisher is async and single-attempt; retry/backoff policy is intentionally owned by outbox to keep retry control deterministic.
 - Cleanup archives/deletes old `SENT` rows on retention schedule.
 
 ### Kafka consumer
