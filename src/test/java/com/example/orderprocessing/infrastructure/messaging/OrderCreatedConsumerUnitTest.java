@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.kafka.support.Acknowledgment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -46,7 +47,8 @@ class OrderCreatedConsumerUnitTest {
                 }
                 """.formatted(orderId, Instant.now().minus(6, ChronoUnit.MINUTES));
 
-        consumer.consume(payload);
+        Acknowledgment ack = () -> { };
+        consumer.consume(payload, ack);
 
         assertEquals(OrderStatus.PROCESSING, orderRepository.findById(orderId).orElseThrow().getStatus());
         assertEquals(1, processedRepository.savedCount());

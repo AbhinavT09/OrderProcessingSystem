@@ -24,7 +24,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.security.jwt-secret=test-secret-for-integration-tests-123456",
         "app.security.rate-limit.requests=1000",
         "spring.kafka.listener.auto-startup=false",
-        "spring.kafka.admin.auto-create=false"
+        "spring.kafka.admin.auto-create=false",
+        "spring.task.scheduling.enabled=false"
 })
 @AutoConfigureMockMvc
 class OrderControllerIntegrationTest {

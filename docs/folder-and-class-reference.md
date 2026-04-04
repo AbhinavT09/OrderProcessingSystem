@@ -1,292 +1,175 @@
-# Folder and Class Reference (Detailed)
+# Folder and Class Reference (Implementation-Accurate)
 
-This section documents every source folder and class currently in the project.
-
-## Folder map
-
-```text
-src/main/java/com/example/orderprocessing
-├── OrderProcessingApplication.java
-├── api
-│   ├── controller
-│   ├── dto
-│   ├── error
-│   └── exception
-├── application
-│   ├── event
-│   ├── exception
-│   ├── port
-│   └── service
-├── config
-├── domain
-│   ├── model
-│   └── state
-└── infrastructure
-    ├── cache
-    ├── messaging
-    ├── persistence
-    │   ├── adapter
-    │   ├── entity
-    │   └── repository
-    ├── security
-    └── web
-```
+This is a class-by-class implementation reference for the current codebase.
 
 ## Root package
 
 ### `OrderProcessingApplication`
-- Role: Spring Boot app entry point.
-- Key behavior: bootstraps context, enables retry support.
+- Bootstraps Spring Boot
+- Enables retry and scheduling (for outbox publisher)
 
-## API package
+## API layer
 
 ### `api/controller/OrderController`
-- Role: HTTP transport layer for `/orders`.
-- Endpoints:
-  - `POST /orders`
-  - `GET /orders/{id}`
-  - `PATCH /orders/{id}/status`
-  - `GET /orders`
-  - `PATCH /orders/{id}/cancel`
-- Notes: delegates to `OrderService` and `OrderQueryService`; validates request/header fields.
+- REST entrypoint for order operations
+- Delegates writes to `OrderService`, reads to `OrderQueryService`
 
-### `api/dto/CreateOrderRequest`
-- Role: request contract for create order.
-- Validation: `items` must be non-empty and element-valid.
+### DTOs
+- `CreateOrderRequest`
+- `OrderItemRequest`
+- `UpdateOrderStatusRequest`
+- `OrderResponse`
 
-### `api/dto/OrderItemRequest`
-- Role: API view of item payload.
-- Validation: product non-blank, quantity >= 1, price >= 0.
+### Error handling
+- `ApiError`: standardized response envelope
+- `GlobalExceptionHandler`: maps typed exceptions to HTTP codes
 
-### `api/dto/UpdateOrderStatusRequest`
-- Role: request contract for status updates.
-- Validation: `status` non-null, `version` non-null and >= 0.
+## Application layer
 
-### `api/dto/OrderResponse`
-- Role: response contract for order resources.
-- Fields: id, status, createdAt, items.
+### Services
 
-### `api/error/ApiError`
-- Role: canonical error payload shape.
-- Fields: code, message, requestId, timestamp.
+#### `OrderService`
+- Write-side orchestration
+- Idempotent create behavior
+- Optimistic locking conflict checks
+- Writes outbox records (no direct Kafka publish)
+- Cache invalidation on writes
 
-### `api/exception/GlobalExceptionHandler`
-- Role: centralized exception-to-HTTP mapper.
-- Maps:
-  - `NotFoundException -> 404`
-  - `ConflictException -> 409`
-  - `InfrastructureException -> 503`
-  - Validation and malformed input -> 400
-  - fallback -> 500
+#### `OrderQueryService`
+- Read-side orchestration
+- Cache-aside by ID and status list
+- Stampede protection with key-lock coalescing
+- TTL writes via `CacheProvider.put(key, value, ttl)`
 
-## Application package
+#### `OrderMapper`
+- Maps API DTOs <-> domain <-> entities
 
-### `application/event/OrderCreatedEvent`
-- Role: Kafka event contract for order creation.
-- Fields: `eventId`, `eventType`, `orderId`, `occurredAt`.
+#### `OutboxService`
+- Serializes event payload and persists `OutboxEntity`
 
-### `application/exception/NotFoundException`
-- Role: semantic missing-resource exception.
+### Ports
 
-### `application/exception/ConflictException`
-- Role: semantic business/conflict exception.
+- `OrderRepository`
+- `EventPublisher`
+- `CacheProvider`
+- `ProcessedEventRepository`
+- `OutboxRepository`
 
-### `application/exception/InfrastructureException`
-- Role: wrapper for external dependency failures.
+### Events and exceptions
 
-### `application/port/OrderRepository`
-- Role: persistence port for orders.
-- Operations: save/find/list/findByStatus/findByIdempotencyKey.
+- `OrderCreatedEvent`
+- `NotFoundException`
+- `ConflictException`
+- `InfrastructureException`
 
-### `application/port/EventPublisher`
-- Role: outbound event publishing port.
+## Domain layer
 
-### `application/port/CacheProvider`
-- Role: cache abstraction port.
-- Operations: `get`, `put`, `evict`.
+### `Order`
+- Aggregate root with behavior methods
+- Delegates transition rules to state objects
 
-### `application/port/ProcessedEventRepository`
-- Role: dedupe marker repository port for consumed events.
+### `OrderItem`
+- Value object for line items
 
-### `application/service/OrderService`
-- Role: write-side application service.
-- Responsibilities:
-  - create order with idempotency support
-  - publish order-created event
-  - status update/cancel with optimistic lock checks
-  - cache invalidation
-  - write-path metrics and logging context
+### `OrderStatus`
+- Lifecycle statuses enum
 
-### `application/service/OrderQueryService`
-- Role: read-side application service.
-- Responsibilities:
-  - get by id / list by status
-  - cache-aside loading
-  - cache stampede prevention with key locks
-  - read-path metrics
+### State package
 
-### `application/service/OrderMapper`
-- Role: transformation between API DTOs, domain aggregate, and persistence entities.
+- `OrderState` (interface)
+- `AbstractOrderState` (common transition logic)
+- `OrderStateFactory`
+- `PendingState`
+- `ProcessingState`
+- `ShippedState`
+- `DeliveredState`
+- `CancelledState`
 
-### `application/service/CachedOrderList`
-- Role: typed wrapper for caching list results.
-
-## Config package
-
-### `config/SecurityConfig`
-- Role: security policy and JWT decoder wiring.
-- Responsibilities:
-  - stateless session policy
-  - endpoint authorization rules
-  - OAuth2 JWT resource server setup
-  - JSON 401/403 response formatting
-  - rate-limiter filter insertion in chain
-
-## Domain package
-
-### `domain/model/Order`
-- Role: aggregate root with lifecycle behavior.
-- Contains state object, immutable identifiers, and behavior methods.
-
-### `domain/model/OrderItem`
-- Role: value object for line-item data.
-
-### `domain/model/OrderStatus`
-- Role: status enumeration.
-
-### `domain/state/OrderState`
-- Role: interface for polymorphic state behavior.
-
-### `domain/state/AbstractOrderState`
-- Role: shared transition logic + default conflict behavior.
-
-### `domain/state/OrderStateFactory`
-- Role: maps enum status to concrete state objects.
-
-### `domain/state/PendingState`
-- Role: pending-specific behavior; supports cancel and delayed promotion.
-
-### `domain/state/ProcessingState`
-- Role: processing-specific transition rules.
-
-### `domain/state/ShippedState`
-- Role: shipped-specific transition rules.
-
-### `domain/state/DeliveredState`
-- Role: terminal delivered state.
-
-### `domain/state/CancelledState`
-- Role: terminal cancelled state.
-
-## Infrastructure package
+## Infrastructure layer
 
 ### Cache
 
-#### `infrastructure/cache/RedisCacheProvider`
-- Role: cache adapter implementing `CacheProvider`.
-- Notes: currently backed by in-memory `ConcurrentHashMap` with fail-safe behavior.
+#### `RedisCacheProvider`
+- Redis JSON cache implementation
+- Metrics: hit/miss/error
+- Fail-safe fallback behavior
 
 ### Messaging
 
-#### `infrastructure/messaging/KafkaEventPublisher`
-- Role: `EventPublisher` adapter.
-- Responsibilities:
-  - serialize and publish `OrderCreatedEvent`
-  - key by `orderId` for partition affinity
-  - retry + circuit breaker
+#### `KafkaEventPublisher`
+- Outbound Kafka adapter
+- Retries + circuit breaker
 
-#### `infrastructure/messaging/OrderCreatedConsumer`
-- Role: asynchronous delayed event processor.
-- Responsibilities:
-  - parse payload
-  - idempotency check via processed-event repo
-  - enforce processing delay via retryable exceptions
-  - promote pending orders to processing
-  - write processed marker
+#### `OutboxPublisher`
+- Scheduled outbox dispatcher
+- Exponential backoff + max retry
+- Metrics: pending/failure/publish latency
 
-#### `infrastructure/messaging/DelayedProcessingNotReadyException`
-- Role: signal to retry later when delay threshold not met.
+#### `OrderCreatedConsumer`
+- Kafka consumer with retry-topic strategy
+- Manual offset acknowledgment
+- Idempotent consume via processed-events table
+- DLQ enriched logging + metrics
 
-#### `infrastructure/messaging/RetryableProcessingException`
-- Role: signal transient processing failure for retry pipeline.
+#### `KafkaConsumerRebalanceObserver`
+- Emits logs for consumer lifecycle and partition pause/resume
 
-### Persistence adapters
+#### `DelayedProcessingNotReadyException`
+- Signals delayed retry path
 
-#### `infrastructure/persistence/adapter/PostgresOrderRepository`
-- Role: `OrderRepository` adapter using Spring Data JPA repo.
+#### `RetryableProcessingException`
+- Signals transient processing retry path
 
-#### `infrastructure/persistence/adapter/JpaProcessedEventRepository`
-- Role: `ProcessedEventRepository` adapter using Spring Data JPA repo.
+### Persistence
 
-### Persistence entities
+#### Adapters
+- `PostgresOrderRepository`
+- `JpaProcessedEventRepository`
+- `JpaOutboxRepository`
 
-#### `infrastructure/persistence/entity/OrderEntity`
-- Role: DB model for orders.
-- Key details:
-  - `@Version` for optimistic locking
-  - unique idempotency key
-  - eager element-collection for items
+#### Repositories
+- `SpringOrderJpaRepository`
+- `SpringProcessedEventJpaRepository`
+- `SpringOutboxJpaRepository`
 
-#### `infrastructure/persistence/entity/OrderItemEmbeddable`
-- Role: embedded line-item persistence shape.
-
-#### `infrastructure/persistence/entity/ProcessedEventEntity`
-- Role: consumed event dedupe marker.
-- Key detail: unique `eventId` constraint.
-
-### Persistence repositories
-
-#### `infrastructure/persistence/repository/SpringOrderJpaRepository`
-- Role: Spring Data repository for `OrderEntity`.
-- Additional methods: status-ordered find, idempotency-key find.
-
-#### `infrastructure/persistence/repository/SpringProcessedEventJpaRepository`
-- Role: Spring Data repository for `ProcessedEventEntity`.
-- Additional method: `existsByEventId`.
+#### Entities
+- `OrderEntity`
+- `OrderItemEmbeddable`
+- `ProcessedEventEntity`
+- `OutboxEntity`
+- `OutboxStatus`
 
 ### Security
 
-#### `infrastructure/security/RoleClaimJwtAuthenticationConverter`
-- Role: maps JWT `roles` claim to `ROLE_*` authorities.
+#### `RoleClaimJwtAuthenticationConverter`
+- JWT `roles` claim -> Spring authorities
 
 ### Web filters
 
-#### `infrastructure/web/RequestContextFilter`
-- Role: request correlation and HTTP metric instrumentation.
-- Behavior:
-  - generate/propagate `X-Request-Id`
-  - set MDC fields
-  - record latency/count/error metrics
+#### `RequestContextFilter`
+- Request ID propagation and HTTP metrics
 
-#### `infrastructure/web/RateLimitingFilter`
-- Role: fixed-window in-memory rate limiting.
-- Behavior:
-  - per key: method + URI + subject-hash + IP
-  - blocks over limit with HTTP 429 `ApiError`
-  - increments blocked counter metric
+#### `RateLimitingFilter`
+- Redis Lua token-bucket limiter
+- Key: `userId:path:ip`
+- Metrics: allowed/blocked
+- Returns 429 `ApiError`
 
-## Resource/config files
+## Config
 
-### `src/main/resources/application.yml`
-- Central runtime config for:
-  - datasource/JPA
-  - Kafka producer/consumer/retry/delay
-  - security secret and rate limits
-  - actuator endpoints
-  - metrics percentiles
-  - OTEL tracing export
-  - JSON logging pattern
+### `SecurityConfig`
+- Stateless security model
+- Route-level RBAC
+- JWT decoder setup
+- 401/403 JSON handlers
+- Rate limiting filter wiring in chain
 
-## Test classes reference
+### `application.yml`
+- Datasource/JPA
+- Redis host/port/timeout
+- Kafka listener/publisher/retry settings
+- Outbox scheduler/retry settings
+- Cache TTL settings
+- Security + rate-limit settings
+- Actuator/tracing/metrics/logging settings
 
-### `OrderAggregateTest`
-- Domain state machine and invariants.
-
-### `OrderControllerIntegrationTest`
-- API security + validation + basic endpoint integration.
-
-### `OrderCreatedEventContractTest`
-- Kafka event schema contract.
-
-### `OrderCreatedConsumerUnitTest`
-- Consumer promotion and dedupe behavior.

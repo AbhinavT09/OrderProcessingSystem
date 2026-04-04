@@ -21,8 +21,8 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 public class SecurityConfig {
@@ -69,7 +69,7 @@ public class SecurityConfig {
                                     Instant.now());
                             response.getWriter().write(objectMapper.writeValueAsString(body));
                         }))
-                .addFilterBefore(rateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(rateLimitingFilter, BearerTokenAuthenticationFilter.class)
                 .build();
     }
 

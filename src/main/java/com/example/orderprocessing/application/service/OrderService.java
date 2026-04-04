@@ -6,7 +6,6 @@ import com.example.orderprocessing.application.event.OrderCreatedEvent;
 import com.example.orderprocessing.application.exception.ConflictException;
 import com.example.orderprocessing.application.exception.NotFoundException;
 import com.example.orderprocessing.application.port.CacheProvider;
-import com.example.orderprocessing.application.port.EventPublisher;
 import com.example.orderprocessing.application.port.OrderRepository;
 import com.example.orderprocessing.domain.model.Order;
 import com.example.orderprocessing.domain.model.OrderStatus;
@@ -32,7 +31,7 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final CacheProvider cacheProvider;
-    private final EventPublisher eventPublisher;
+    private final OutboxService outboxService;
     private final OrderMapper mapper;
     private final Counter createCounter;
     private final Counter requestCounter;
@@ -42,12 +41,12 @@ public class OrderService {
 
     public OrderService(OrderRepository orderRepository,
                         CacheProvider cacheProvider,
-                        EventPublisher eventPublisher,
+                        OutboxService outboxService,
                         OrderMapper mapper,
                         MeterRegistry meterRegistry) {
         this.orderRepository = orderRepository;
         this.cacheProvider = cacheProvider;
-        this.eventPublisher = eventPublisher;
+        this.outboxService = outboxService;
         this.mapper = mapper;
         this.requestCounter = meterRegistry.counter("orders.service.request.count");
         this.createCounter = meterRegistry.counter("orders.created.count");
@@ -81,7 +80,7 @@ public class OrderService {
                         "ORDER_CREATED",
                         saved.getId().toString(),
                         Instant.now().toString());
-                eventPublisher.publishOrderCreated(createdEvent);
+                outboxService.enqueueOrderCreated(saved.getId().toString(), createdEvent);
                 invalidateStatusCaches();
 
                 createCounter.increment();

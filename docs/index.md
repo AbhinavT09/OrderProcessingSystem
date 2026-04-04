@@ -1,72 +1,103 @@
 # Order Processing System - Project Documentation
 
-This site documents the complete backend system design, implementation choices, runtime behavior, and class-level structure.
+This documentation reflects the **current implementation** of the project, including outbox publishing, Redis-backed caching/rate-limiting, Kafka reliability controls, and observability.
 
-## What this project is
+## System capabilities
 
-A production-style Java Spring Boot backend for e-commerce order processing with:
+- Hexagonal architecture with CQRS (`OrderService` write side, `OrderQueryService` read side)
+- Domain aggregate with State Pattern (`Order` + `OrderState` hierarchy)
+- Transactional Outbox pattern for reliable event publishing
+- Kafka delayed processing with retry topics + DLQ
+- Redis-backed distributed cache (JSON serialization + TTLs)
+- Redis-backed distributed token-bucket rate limiting (Lua + atomic updates)
+- JWT auth + RBAC + validation + structured API errors
+- Prometheus metrics + tracing + structured JSON logs
 
-- Hexagonal architecture with clear ports/adapters
-- CQRS split between write and read services
-- Domain aggregate (`Order`) with State Pattern
-- Event-driven delayed processing through Kafka
-- Idempotency and optimistic locking for race safety
-- JWT auth, RBAC, validation, and rate limiting
-- Structured logs, metrics, and tracing for observability
+## Interactive architecture diagrams
 
-## Interactive diagrams
-
-### End-to-end request and event flow
+### Full runtime flow
 
 ```mermaid
 flowchart LR
-    Client[API Client] --> API[OrderController]
-    API --> WS[OrderService\nWrite side]
-    API --> QS[OrderQueryService\nRead side]
+    Client[API Client] --> SEC[Security Chain]
+    SEC --> API[OrderController]
 
-    WS --> OR[(OrderRepository Port)]
-    OR --> PR[PostgresOrderRepository]
-    PR --> DB[(Orders table)]
+    API --> WS[OrderService write]
+    API --> QS[OrderQueryService read]
 
-    WS --> EP[(EventPublisher Port)]
-    EP --> KP[KafkaEventPublisher]
-    KP --> K[(Kafka order.events)]
+    WS --> ORD[(OrderRepository Port)]
+    ORD --> JPA[PostgresOrderRepository]
+    JPA --> DB[(orders/order_items)]
 
-    K --> KC[OrderCreatedConsumer]
-    KC --> PER[(ProcessedEventRepository Port)]
-    PER --> JPR[JpaProcessedEventRepository]
-    JPR --> PDB[(processed_events table)]
+    WS --> OUT[(OutboxRepository Port)]
+    OUT --> OUTJPA[JpaOutboxRepository]
+    OUTJPA --> ODB[(outbox_events)]
 
-    WS --> CP[(CacheProvider Port)]
-    QS --> CP
-    CP --> RC[RedisCacheProvider\nIn-memory fallback]
-
-    subgraph Security and Edge
-      RQ[RequestContextFilter]
-      RL[RateLimitingFilter]
-      SEC[SecurityConfig + JWT RBAC]
+    subgraph Async Outbox Publish
+      PUB[OutboxPublisher scheduler] --> ODB
+      PUB --> KEP[KafkaEventPublisher]
+      KEP --> K[(Kafka order.events)]
     end
 
-    Client --> RL --> RQ --> SEC --> API
+    K --> KC[OrderCreatedConsumer]
+    KC --> PR[(ProcessedEventRepository Port)]
+    PR --> PRJPA[JpaProcessedEventRepository]
+    PRJPA --> PDB[(processed_events)]
+    KC --> DB
+
+    QS --> CP[(CacheProvider Port)]
+    CP --> RCP[RedisCacheProvider]
+    RCP --> REDIS[(Redis)]
+
+    SEC --> RL[RateLimitingFilter Redis Token Bucket]
+    SEC --> RC[RequestContextFilter]
+    SEC --> JWT[JWT auth + RBAC]
 ```
 
-### Order state machine
+### State transition model
 
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING
-    PENDING --> PROCESSING: updateStatus or delayed consumer
-    PENDING --> SHIPPED: updateStatus
-    PENDING --> DELIVERED: updateStatus
-    PENDING --> CANCELLED: cancel()
+    PENDING --> PROCESSING: delayed event OR update status
+    PENDING --> SHIPPED: update status
+    PENDING --> DELIVERED: update status
+    PENDING --> CANCELLED: cancel
 
-    PROCESSING --> SHIPPED: updateStatus
-    PROCESSING --> DELIVERED: updateStatus
-
-    SHIPPED --> DELIVERED: updateStatus
+    PROCESSING --> SHIPPED
+    PROCESSING --> DELIVERED
+    SHIPPED --> DELIVERED
 
     DELIVERED --> [*]
     CANCELLED --> [*]
+```
+
+### Outbox reliability sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant OS as OrderService
+    participant DB as Orders DB
+    participant ODB as Outbox DB
+    participant OP as OutboxPublisher
+    participant K as Kafka
+
+    C->>OS: create order
+    OS->>DB: save OrderEntity
+    OS->>ODB: save OutboxEntity(PENDING)
+    OS-->>C: 201 Created
+
+    loop scheduler poll
+      OP->>ODB: fetch PENDING/FAILED
+      OP->>K: publish event
+      alt publish success
+        OP->>ODB: mark SENT
+      else publish fails
+        OP->>ODB: retry_count++, mark FAILED
+      end
+    end
 ```
 
 ## Documentation map
@@ -81,12 +112,13 @@ stateDiagram-v2
 
 - Java 17
 - Maven 3.9+
-- Kafka broker (for event flow)
-- Optional OTEL collector for trace export (`http://localhost:4318/v1/traces`)
+- Redis (cache + distributed rate limiting)
+- Kafka broker
+- Optional OTEL collector (`http://localhost:4318/v1/traces`)
 
-## Local run
+## Run
 
 ```bash
-mvn clean test
+mvn clean compile
 mvn spring-boot:run
 ```

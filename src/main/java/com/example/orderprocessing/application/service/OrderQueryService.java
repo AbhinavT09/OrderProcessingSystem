@@ -9,9 +9,11 @@ import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Timer;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,18 +26,24 @@ public class OrderQueryService {
     private final Timer queryTimer;
     private final Counter requestCounter;
     private final Counter errorCounter;
+    private final Duration orderByIdTtl;
+    private final Duration orderListTtl;
     private final ConcurrentHashMap<String, Object> keyLocks = new ConcurrentHashMap<>();
 
     public OrderQueryService(OrderRepository orderRepository,
                              CacheProvider cacheProvider,
                              OrderMapper mapper,
-                             MeterRegistry meterRegistry) {
+                             MeterRegistry meterRegistry,
+                             @Value("${app.cache.ttl.order-by-id-seconds:300}") long orderByIdTtlSeconds,
+                             @Value("${app.cache.ttl.order-list-seconds:60}") long orderListTtlSeconds) {
         this.orderRepository = orderRepository;
         this.cacheProvider = cacheProvider;
         this.mapper = mapper;
         this.queryTimer = meterRegistry.timer("orders.query.duration");
         this.requestCounter = meterRegistry.counter("orders.query.request.count");
         this.errorCounter = meterRegistry.counter("orders.query.error.count");
+        this.orderByIdTtl = Duration.ofSeconds(orderByIdTtlSeconds);
+        this.orderListTtl = Duration.ofSeconds(orderListTtlSeconds);
     }
 
     @Transactional(readOnly = true)
@@ -47,7 +55,7 @@ public class OrderQueryService {
                 return cacheProvider.get(key, OrderResponse.class)
                         .orElseGet(() -> coalescedOrderLoad(key, () -> {
                             OrderResponse loaded = mapper.toResponse(mapper.toDomain(findEntity(id)));
-                            cacheProvider.put(key, loaded);
+                            cacheProvider.put(key, loaded, orderByIdTtl);
                             return loaded;
                         }));
             } catch (RuntimeException ex) {
@@ -68,7 +76,7 @@ public class OrderQueryService {
                         .orElseGet(() -> coalescedStatusLoad(key, () -> {
                             List<OrderEntity> orders = status == null ? orderRepository.findAll() : orderRepository.findByStatus(status);
                             List<OrderResponse> loaded = orders.stream().map(mapper::toDomain).map(mapper::toResponse).toList();
-                            cacheProvider.put(key, new CachedOrderList(loaded));
+                            cacheProvider.put(key, new CachedOrderList(loaded), orderListTtl);
                             return loaded;
                         }));
             } catch (RuntimeException ex) {

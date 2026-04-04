@@ -10,10 +10,14 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Instant;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Collections;
 import org.slf4j.MDC;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -21,25 +25,63 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 public class RateLimitingFilter extends OncePerRequestFilter {
 
-    private static final class WindowCounter {
-        long windowStartMs;
-        int count;
-    }
+    private static final Logger log = LoggerFactory.getLogger(RateLimitingFilter.class);
 
-    private final Map<String, WindowCounter> counters = new ConcurrentHashMap<>();
+    private static final String TOKEN_BUCKET_LUA = """
+            local key = KEYS[1]
+            local now = tonumber(ARGV[1])
+            local capacity = tonumber(ARGV[2])
+            local refill_per_ms = tonumber(ARGV[3])
+            local requested = tonumber(ARGV[4])
+            local ttl_ms = tonumber(ARGV[5])
+
+            local data = redis.call('HMGET', key, 'tokens', 'ts')
+            local tokens = tonumber(data[1])
+            local ts = tonumber(data[2])
+            if not tokens then
+                tokens = capacity
+                ts = now
+            end
+
+            local delta = math.max(0, now - ts)
+            tokens = math.min(capacity, tokens + (delta * refill_per_ms))
+
+            local allowed = 0
+            if tokens >= requested then
+                tokens = tokens - requested
+                allowed = 1
+            end
+
+            redis.call('HMSET', key, 'tokens', tokens, 'ts', now)
+            redis.call('PEXPIRE', key, ttl_ms)
+            return allowed
+            """;
+
+    private static final long REQUEST_TOKENS = 1L;
+    private static final long KEY_TTL_MULTIPLIER = 2L;
+
+    private final StringRedisTemplate redisTemplate;
+    private final RedisScript<Long> tokenBucketScript;
     private final ObjectMapper objectMapper;
-    private final Counter rateLimitCounter;
+    private final Counter allowedCounter;
+    private final Counter blockedCounter;
     private final int requestsPerWindow;
     private final long windowMs;
+    private final double refillPerMs;
 
-    public RateLimitingFilter(ObjectMapper objectMapper,
+    public RateLimitingFilter(StringRedisTemplate redisTemplate,
+                              ObjectMapper objectMapper,
                               MeterRegistry meterRegistry,
                               @Value("${app.security.rate-limit.requests:120}") int requestsPerWindow,
                               @Value("${app.security.rate-limit.window-ms:60000}") long windowMs) {
+        this.redisTemplate = redisTemplate;
+        this.tokenBucketScript = new DefaultRedisScript<>(TOKEN_BUCKET_LUA, Long.class);
         this.objectMapper = objectMapper;
-        this.rateLimitCounter = meterRegistry.counter("http.server.rate_limit.blocked.count");
+        this.allowedCounter = meterRegistry.counter("rate_limit.allowed.count");
+        this.blockedCounter = meterRegistry.counter("rate_limit.blocked.count");
         this.requestsPerWindow = requestsPerWindow;
         this.windowMs = windowMs;
+        this.refillPerMs = windowMs <= 0 ? 0D : ((double) requestsPerWindow) / (double) windowMs;
     }
 
     @Override
@@ -51,43 +93,41 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        String key = buildKey(request);
-        long now = System.currentTimeMillis();
-
-        WindowCounter state = counters.computeIfAbsent(key, k -> {
-            WindowCounter wc = new WindowCounter();
-            wc.windowStartMs = now;
-            wc.count = 0;
-            return wc;
-        });
-
-        synchronized (state) {
-            if (now - state.windowStartMs >= windowMs) {
-                state.windowStartMs = now;
-                state.count = 0;
-            }
-            state.count++;
-            if (state.count > requestsPerWindow) {
-                rateLimitCounter.increment();
-                writeRateLimitResponse(response);
-                return;
-            }
+        if (!isRequestAllowed(request)) {
+            blockedCounter.increment();
+            writeRateLimitResponse(response);
+            return;
         }
-
+        allowedCounter.increment();
         filterChain.doFilter(request, response);
     }
 
     private String buildKey(HttpServletRequest request) {
-        String authorization = request.getHeader("Authorization");
-        String subjectKey = "anonymous";
-        if (authorization != null && authorization.startsWith("Bearer ")) {
-            // Keep key cardinality bounded by hashing token material.
-            subjectKey = Integer.toHexString(authorization.substring(7).hashCode());
-        } else if (request.getUserPrincipal() != null) {
-            subjectKey = request.getUserPrincipal().getName();
-        }
+        String userId = request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : "anonymous";
+        String path = request.getRequestURI();
         String ip = request.getRemoteAddr();
-        return request.getMethod() + ":" + request.getRequestURI() + ":" + subjectKey + ":" + ip;
+        return "rate_limit:" + userId + ":" + path + ":" + ip;
+    }
+
+    private boolean isRequestAllowed(HttpServletRequest request) {
+        String key = buildKey(request);
+        long nowMs = System.currentTimeMillis();
+        long ttlMs = Math.max(windowMs * KEY_TTL_MULTIPLIER, windowMs);
+        try {
+            Long allowed = redisTemplate.execute(
+                    tokenBucketScript,
+                    Collections.singletonList(key),
+                    String.valueOf(nowMs),
+                    String.valueOf(requestsPerWindow),
+                    String.valueOf(refillPerMs),
+                    String.valueOf(REQUEST_TOKENS),
+                    String.valueOf(ttlMs));
+            return allowed != null && allowed == 1L;
+        } catch (RuntimeException ex) {
+            // Fail-open to protect API availability if Redis is degraded.
+            log.warn("Redis rate limiting failure key={} reason={}", key, ex.toString());
+            return true;
+        }
     }
 
     private void writeRateLimitResponse(HttpServletResponse response) throws IOException {

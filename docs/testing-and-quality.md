@@ -1,63 +1,50 @@
 # Testing and Quality Strategy
 
-## Test layers implemented
+## Test layers
 
-### 1) Domain unit tests
+### Domain tests
+- `OrderAggregateTest`
+- Verifies state machine invariants and transition rules.
 
-File: `src/test/java/com/example/orderprocessing/domain/model/OrderAggregateTest.java`
+### API integration tests
+- `OrderControllerIntegrationTest`
+- Validates auth/rbac/validation contracts and endpoint behavior.
 
-Coverage:
+### Contract tests
+- `OrderCreatedEventContractTest`
+- Ensures event schema compatibility over time.
 
-- Valid lifecycle transitions
-- Invalid transitions rejected with conflict
-- Cancel behavior constraint (pending-only)
-- Pending promotion semantics
+### Consumer behavior tests
+- `OrderCreatedConsumerUnitTest`
+- Verifies delayed promotion and processed-marker write.
 
-### 2) API integration tests
+## Failure-oriented test recommendations (next additions)
 
-File: `src/test/java/com/example/orderprocessing/api/OrderControllerIntegrationTest.java`
+To fully mirror runtime resilience, add:
 
-Coverage:
+1. **Outbox retry tests**
+   - publish failure increments retry count and leaves status FAILED
+   - success transition to SENT
 
-- Authentication required (`401`)
-- Authorized create and fetch flow
-- RBAC authorization behavior (`403`)
-- Validation behavior for headers/payload (`400`)
+2. **Rate limiter Redis script tests**
+   - token-bucket allows within limit, blocks beyond capacity
+   - key structure contains user/path/ip dimensions
 
-Notes:
+3. **Consumer ack tests**
+   - ack called only after successful process
+   - no ack on retry-throwing paths
 
-- Uses `MockMvc` with Spring context.
-- Uses Spring Security test JWT request post-processors.
-- Kafka auto-start/admin creation disabled for deterministic API tests.
+4. **DLQ handler tests**
+   - verifies metric increment and enriched log context fields
 
-### 3) Kafka contract tests
+5. **Cache TTL tests**
+   - ID cache uses 5 min TTL
+   - list cache uses 1 min TTL
 
-File: `src/test/java/com/example/orderprocessing/infrastructure/messaging/OrderCreatedEventContractTest.java`
+## Quality principles
 
-Coverage:
+- Correctness-first writes (idempotency + optimistic locking + outbox)
+- Eventual consistency for async transitions with bounded retries
+- Degrade gracefully on cache/redis outages
+- Observable by default (logs/metrics/traces)
 
-- Producer payload field presence and naming contract
-- Consumer-side deserialization compatibility
-- Invalid payload rejection
-
-### 4) Consumer behavior unit test
-
-File: `src/test/java/com/example/orderprocessing/infrastructure/messaging/OrderCreatedConsumerUnitTest.java`
-
-Coverage:
-
-- Promotion to `PROCESSING` when delayed threshold passed
-- Processed marker persistence for dedupe
-
-## Build command
-
-```bash
-mvn clean test
-```
-
-## Quality principles used
-
-- Domain invariants are validated at aggregate/state layer.
-- API behavior is validated at HTTP boundary.
-- Event schema is validated as a contract (not only implementation detail).
-- Integration tests avoid brittle infra dependencies where possible.

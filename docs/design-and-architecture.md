@@ -1,82 +1,38 @@
 # Design and Architecture
 
-## Architectural style
+## 1) Architectural style
 
-The project follows a **Hexagonal (Ports and Adapters)** architecture with **CQRS**.
+The project uses **Hexagonal Architecture + CQRS + DDD Aggregate**:
 
-- Domain contains business rules and lifecycle invariants.
-- Application layer orchestrates use-cases and depends on ports.
-- Infrastructure layer provides adapters to Kafka, persistence, cache, and web filters.
-- API layer exposes HTTP endpoints and maps transport concerns.
+- **Domain layer:** business invariants and state transitions only
+- **Application layer:** use-case orchestration and ports
+- **Infrastructure layer:** Kafka, Redis, persistence, filters, security adapters
+- **API layer:** HTTP transport + DTO + exception mapping
 
 CQRS split:
 
-- **Write side:** `OrderService`
-- **Read side:** `OrderQueryService`
+- **Write:** `OrderService`
+- **Read:** `OrderQueryService`
 
-## Why this architecture
+## 2) Why this design (real-world reasoning)
 
-- Keeps domain logic isolated from framework details.
-- Makes external dependencies replaceable via ports.
-- Supports independent evolution of reads/writes.
-- Improves testability: domain can be tested without Spring/Kafka/DB.
+- In a real e-commerce checkout system, you need **strict write correctness** (no duplicate order creation, no lost updates) and **fast reads** (cache backed).
+- Messaging is asynchronous because payment/fulfillment style flows are not always immediate.
+- Outbox is used to prevent the "DB commit succeeded but Kafka failed" inconsistency.
 
-## Layered package map
-
-```mermaid
-flowchart TD
-    D[domain] --> A[application]
-    A --> I[infrastructure]
-    A --> API[api]
-
-    subgraph domain
-      DM[model\nOrder, OrderItem, OrderStatus]
-      DS[state\nOrderState + concrete states]
-    end
-
-    subgraph application
-      AP[port interfaces]
-      AS[services\nOrderService / OrderQueryService]
-      AE[event + exceptions + mapper]
-    end
-
-    subgraph infrastructure
-      IP[persistence adapters + entities + repos]
-      IM[messaging adapters + consumer]
-      IC[cache adapter]
-      IW[web filters]
-      IS[security auth converter]
-    end
-
-    subgraph api
-      AC[OrderController]
-      AD[DTOs]
-      AX[GlobalExceptionHandler + ApiError]
-    end
-```
-
-## Domain model design
+## 3) Domain model and invariants
 
 ### Aggregate root: `Order`
 
-`Order` encapsulates state and lifecycle transitions. It exposes behavior:
+`Order` encapsulates lifecycle behavior:
 
 - `updateStatus(target)`
 - `cancel()`
 - `promotePendingToProcessing()`
 
-The aggregate carries:
-
-- `id`
-- `createdAt`
-- `idempotencyKey`
-- `items`
-- `version`
-- `currentState`
-
 ### State Pattern
 
-Order transition logic is delegated to `OrderState` implementations:
+`OrderState` implementations enforce legal transitions:
 
 - `PendingState`
 - `ProcessingState`
@@ -84,108 +40,117 @@ Order transition logic is delegated to `OrderState` implementations:
 - `DeliveredState`
 - `CancelledState`
 
-`AbstractOrderState` centralizes transition lookup and conflict handling. Invalid transitions throw `ConflictException`.
+Invalid transitions throw `ConflictException`.
 
-### Lifecycle rules enforced
+## 4) Consistency model
 
-- Cancel allowed only while `PENDING`.
-- Pending can auto-promote to processing after delay.
-- Terminal states (`DELIVERED`, `CANCELLED`) do not transition.
+### Strong consistency
 
-## CQRS and consistency model
+- Order writes in DB transaction
+- Optimistic locking (`@Version`) for update/cancel races
+- Idempotent order creation with unique idempotency key
 
-- Writes happen through `OrderService` and persist to DB.
-- Reads happen through `OrderQueryService` with cache-aside strategy.
-- Eventual processing (`PENDING -> PROCESSING`) is asynchronous via Kafka event consumption.
-- Consumer idempotency ensures retries do not duplicate side effects.
+### Eventual consistency
 
-## Concurrency and integrity strategy
+- `PENDING -> PROCESSING` is asynchronous via Kafka consumer delay
+- Retries + DLQ for transient/non-transient failures
 
-- **Optimistic locking:** `@Version` on `OrderEntity.version`.
-- **Version check:** API update request includes expected version.
-- **Idempotent creates:** `X-Idempotency-Key` mapped to unique DB key.
-- **Consumer idempotency:** `processed_events` table keyed by unique `eventId`.
+## 5) Transactional Outbox implementation
 
-## Error boundary strategy
+### Write transaction flow
 
-- Domain/application failures surfaced as typed exceptions:
-  - `NotFoundException`
-  - `ConflictException`
-  - `InfrastructureException`
-- API exception handler maps these to stable HTTP responses and structured `ApiError` payloads.
+1. Persist `OrderEntity`
+2. Persist `OutboxEntity(status=PENDING, payload=OrderCreatedEvent)`
+3. Commit transaction
 
-## Security architecture summary
+No Kafka call occurs inside this transaction.
 
-- Stateless JWT Bearer authentication.
-- `roles` claim mapped to `ROLE_*` authorities.
-- Route-level RBAC in `SecurityConfig`.
-- Rate limiter as servlet filter before auth chain.
-- Request correlation middleware sets/propagates `X-Request-Id`.
+### Publisher flow
 
-## Additional interactive design docs
+`OutboxPublisher` periodically scans `PENDING/FAILED` rows and publishes:
 
-### Sequence: create order and delayed processing
+- On success -> status `SENT`
+- On failure -> `retryCount++`, status `FAILED`
+- Exponential backoff and max retries prevent infinite loops
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Client
-    participant OC as OrderController
-    participant OS as OrderService
-    participant OR as OrderRepository
-    participant EP as EventPublisher/KafkaEventPublisher
-    participant K as Kafka
-    participant KC as OrderCreatedConsumer
-    participant PER as ProcessedEventRepository
+## 6) Kafka consumer reliability design
 
-    C->>OC: POST /orders (+ X-Idempotency-Key)
-    OC->>OS: createOrder(request, key)
-    OS->>OR: save(order=PENDING)
-    OR-->>OS: saved OrderEntity
-    OS->>EP: publishOrderCreated(event)
-    EP->>K: send(topic=order.events, key=orderId)
-    OS-->>OC: 201 OrderResponse
-    OC-->>C: Created
+`OrderCreatedConsumer` correctness controls:
 
-    K-->>KC: consume(event payload)
-    KC->>PER: existsByEventId(eventId)?
-    alt not processed and delay elapsed
-        KC->>OR: findById(orderId)
-        KC->>OR: save(order=PROCESSING)
-        KC->>PER: save(processed marker)
-    else already processed
-        KC-->>KC: skip duplicate safely
-    else not ready yet
-        KC-->>K: throw DelayedProcessingNotReadyException (retry later)
-    end
-```
+- Checks `ProcessedEventRepository` **before** processing
+- Persists processed marker **after** successful processing
+- Manual ack mode (`manual_immediate`) and ack only on success/duplicate-safe path
+- Retry-topic based delayed retries; bounded attempts
+- DLQ handler with rich context logging (topic/partition/offset/event ids)
+- Rebalance lifecycle visibility via `KafkaConsumerRebalanceObserver`
 
-### Security request path and policy enforcement
+## 7) Distributed Redis design
 
-```mermaid
-flowchart LR
-    REQ[Incoming HTTP request] --> RL[RateLimitingFilter]
-    RL --> RC[RequestContextFilter]
-    RC --> JWT[JWT Authentication]
-    JWT --> RBAC[Route RBAC checks]
-    RBAC --> CTRL[OrderController]
+### Cache
 
-    RBAC -->|No token / invalid token| U401[401 UNAUTHORIZED JSON ApiError]
-    RBAC -->|Insufficient role| U403[403 FORBIDDEN JSON ApiError]
-    RL -->|Over limit| U429[429 RATE_LIMITED JSON ApiError]
-```
+- `RedisCacheProvider` uses JSON serialization
+- TTL strategy:
+  - order by id = 5 min
+  - order list = 1 min
+- Fail-safe behavior: cache failures log and fallback to DB path
+- Stampede protection retained in `OrderQueryService` with key locks
 
-### Cache-aside and stampede-control behavior
+### Rate limiting
 
-```mermaid
-flowchart TD
-    RQ[Read request] --> CK{Cache hit?}
-    CK -- Yes --> RET[Return cached response]
-    CK -- No --> LK[Acquire key lock]
-    LK --> RECHK{Cache filled by other thread?}
-    RECHK -- Yes --> RET
-    RECHK -- No --> DB[Load from repository]
-    DB --> PUT[Put in cache]
-    PUT --> UNLK[Release lock]
-    UNLK --> RET
-```
+- `RateLimitingFilter` uses Redis Lua token bucket for atomic updates
+- Key format: `userId:path:ip`
+- Works across multiple service instances
+- Atomic operation prevents races under concurrency
+
+## 8) Security architecture
+
+- JWT stateless auth
+- `roles` claim -> `ROLE_*` authorities
+- Endpoint-level RBAC in `SecurityConfig`
+- Request correlation (`request_id`) and API error normalization
+
+## 9) Real-world failure case walkthroughs
+
+### Case A: Kafka publish outage during order creation
+
+- Order DB save succeeds
+- Outbox row remains `PENDING`
+- OutboxPublisher retries until Kafka healthy
+- No event lost; no transaction rollback needed
+
+### Case B: Duplicate Kafka message delivery
+
+- Consumer checks processed-event table first
+- Duplicate message is skipped and acked
+- No duplicate state transition
+
+### Case C: Redis unavailable
+
+- Cache get/put/evict logs warning and degrades gracefully
+- Read path falls back to DB and continues serving
+- Rate limiter fails open to preserve API availability
+
+### Case D: Concurrent status updates
+
+- Stale version update hits optimistic locking mismatch
+- Service returns `409 CONFLICT`
+- No lost update in DB
+
+### Case E: Consumer rebalance during processing
+
+- Rebalance lifecycle logs are emitted
+- Manual ack only after successful processing
+- Unacked records can be reassigned/retried safely
+
+## 10) Architecture-level failure matrix
+
+| Failure | Protection | Result |
+|---|---|---|
+| DB save fails in create | transaction rollback | no order, no outbox |
+| Kafka unavailable at publish time | outbox retry/backoff | eventual publish |
+| Duplicate Kafka record | processed-event dedupe | idempotent consume |
+| Redis cache failure | fail-safe cache provider | DB fallback |
+| Rate limiter Redis failure | fail-open + log | availability preserved |
+| Concurrent updates | optimistic lock + version check | conflict response |
+| Retry storm risk | bounded retry attempts + DLQ | no infinite loops |
+

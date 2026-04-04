@@ -8,12 +8,26 @@ spring:
     hibernate:
       ddl-auto: update
     open-in-view: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT:2s}
   kafka:
     bootstrap-servers: localhost:9092
     listener:
-      ack-mode: record
+      ack-mode: manual_immediate
 
 app:
+  cache:
+    ttl:
+      order-by-id-seconds: 300
+      order-list-seconds: 60
+  outbox:
+    max-retries: 12
+    backoff-base-ms: 1000
+    publisher:
+      poll-ms: 2000
   security:
     jwt-secret: ${JWT_SECRET:change-me-to-a-strong-32-char-secret}
     rate-limit:

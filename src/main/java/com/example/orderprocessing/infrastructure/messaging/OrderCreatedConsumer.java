@@ -22,10 +22,13 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.kafka.annotation.DltHandler;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
+import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.kafka.retrytopic.DltStrategy;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.messaging.handler.annotation.Header;
 
 @Component
 public class OrderCreatedConsumer {
@@ -37,6 +40,9 @@ public class OrderCreatedConsumer {
     private final ProcessedEventRepository processedEventRepository;
     private final OrderMapper orderMapper;
     private final Counter consumeErrorCounter;
+    private final Counter processedCounter;
+    private final Counter retryCounter;
+    private final Counter dlqCounter;
     private final DistributionSummary kafkaLagMsSummary;
 
     public OrderCreatedConsumer(ObjectMapper objectMapper,
@@ -49,6 +55,9 @@ public class OrderCreatedConsumer {
         this.processedEventRepository = processedEventRepository;
         this.orderMapper = orderMapper;
         this.consumeErrorCounter = meterRegistry.counter("kafka.consumer.errors");
+        this.processedCounter = meterRegistry.counter("kafka.consumer.processed.count");
+        this.retryCounter = meterRegistry.counter("kafka.consumer.retry.count");
+        this.dlqCounter = meterRegistry.counter("kafka.consumer.dlq.count");
         this.kafkaLagMsSummary = DistributionSummary.builder("kafka.consumer.lag.ms")
                 .publishPercentiles(0.95, 0.99)
                 .register(meterRegistry);
@@ -69,18 +78,20 @@ public class OrderCreatedConsumer {
     )
     @KafkaListener(topics = "${app.kafka.order-events-topic:order.events}", groupId = "${app.kafka.consumer-group:order-processing-group}")
     @Transactional
-    public void consume(String payload) {
+    public void consume(String payload, Acknowledgment acknowledgment) {
         try {
             OrderCreatedEvent event = parse(payload);
 
             if (processedEventRepository.existsByEventId(event.eventId())) {
                 log.info("Skipping already processed event eventId={} orderId={}", event.eventId(), event.orderId());
+                acknowledgment.acknowledge();
                 return;
             }
 
             Instant occurredAt = Instant.parse(event.occurredAt());
             kafkaLagMsSummary.record(Math.max(0, Instant.now().toEpochMilli() - occurredAt.toEpochMilli()));
             if (Instant.now().isBefore(occurredAt.plus(5, ChronoUnit.MINUTES))) {
+                retryCounter.increment();
                 throw new DelayedProcessingNotReadyException(
                         "OrderCreated event is not ready for processing yet: " + event.eventId());
             }
@@ -89,6 +100,8 @@ public class OrderCreatedConsumer {
             if (entity.isEmpty()) {
                 log.warn("Order not found for consumed event eventId={} orderId={}", event.eventId(), event.orderId());
                 persistProcessed(event);
+                processedCounter.increment();
+                acknowledgment.acknowledge();
                 return;
             }
 
@@ -103,9 +116,16 @@ public class OrderCreatedConsumer {
             }
 
             persistProcessed(event);
+            processedCounter.increment();
+            acknowledgment.acknowledge();
         } catch (DataAccessException ex) {
             consumeErrorCounter.increment();
+            retryCounter.increment();
             throw new RetryableProcessingException("Transient DB failure while processing event", ex);
+        } catch (DelayedProcessingNotReadyException | RetryableProcessingException ex) {
+            consumeErrorCounter.increment();
+            retryCounter.increment();
+            throw ex;
         } catch (RuntimeException ex) {
             consumeErrorCounter.increment();
             throw ex;
@@ -113,8 +133,24 @@ public class OrderCreatedConsumer {
     }
 
     @DltHandler
-    public void onDlt(String payload) {
-        log.error("OrderCreatedEvent routed to DLQ payload={}", payload);
+    public void onDlt(
+            String payload,
+            @Header(value = KafkaHeaders.RECEIVED_TOPIC, required = false) String topic,
+            @Header(value = KafkaHeaders.RECEIVED_PARTITION, required = false) Integer partition,
+            @Header(value = KafkaHeaders.OFFSET, required = false) Long offset,
+            @Header(value = KafkaHeaders.DLT_EXCEPTION_MESSAGE, required = false) String exceptionMessage) {
+        dlqCounter.increment();
+        String eventId = "unknown";
+        String orderId = "unknown";
+        try {
+            OrderCreatedEvent event = parse(payload);
+            eventId = event.eventId();
+            orderId = event.orderId();
+        } catch (RuntimeException ignored) {
+            // keep unknown identifiers for malformed payloads
+        }
+        log.error("OrderCreatedEvent routed to DLQ topic={} partition={} offset={} eventId={} orderId={} reason={} payload={}",
+                topic, partition, offset, eventId, orderId, exceptionMessage, payload);
     }
 
     private void persistProcessed(OrderCreatedEvent event) {

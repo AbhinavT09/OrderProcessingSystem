@@ -1,120 +1,154 @@
 # Observability, Logging, Monitoring, and Operations
 
-## Observability model
+## 1) Logging implementation details
 
-The system implements all three observability pillars:
+Structured JSON logging includes:
 
-- **Logs:** structured JSON logs with correlation fields
-- **Metrics:** Micrometer counters/timers/summaries exposed to Prometheus
-- **Traces:** OTEL-based distributed tracing export
+- `timestamp`, `level`, `logger`, `message`
+- `request_id` from `RequestContextFilter`
+- `order_id` from service-level MDC context
+- `trace_id` from tracing context
 
-## Structured logging details
+`X-Request-Id` is accepted/generated and returned to clients, enabling incident correlation.
 
-Configured in `application.yml` via `logging.pattern.console` to output JSON lines including:
+## 2) Metrics catalog (current implementation)
 
-- `timestamp`
-- `level`
-- `logger`
-- `message`
-- `request_id` (MDC)
-- `order_id` (MDC)
-- `trace_id` (MDC trace context)
-
-### Correlation fields
-
-- `request_id`
-  - Set by `RequestContextFilter`
-  - Returned in `X-Request-Id` response header
-- `order_id`
-  - Set/cleared in write operations in `OrderService`
-- `trace_id`
-  - Provided by tracing bridge when present
-
-## Metrics inventory
-
-### HTTP edge metrics
-
-From `RequestContextFilter`:
+### HTTP and API metrics
 
 - `http.server.request.count`
-  - tags: `method`, `path`, `status`
-- `http.server.request.latency`
-  - with p95/p99 publication
+- `http.server.request.latency` (p95, p99)
 - `http.server.request.errors`
-  - increments for `>=500`
 
-### Application metrics
-
-From write/read services:
+### Business/service metrics
 
 - `orders.service.request.count`
 - `orders.created.count`
 - `orders.idempotency.hit.count`
 - `orders.operation.failure.count`
-- `orders.operation.duration` (p95/p99)
+- `orders.operation.duration`
 - `orders.query.request.count`
 - `orders.query.error.count`
-- `orders.query.duration` (p95/p99)
+- `orders.query.duration`
 
-### Messaging metrics
+### Cache metrics
 
-From Kafka consumer and rate limiter:
+- `cache.hit.count`
+- `cache.miss.count`
+- `cache.error.count`
+
+### Rate limiting metrics
+
+- `rate_limit.allowed.count`
+- `rate_limit.blocked.count`
+
+### Outbox metrics
+
+- `outbox.pending.count`
+- `outbox.failure.count`
+- `outbox.publish.latency`
+
+### Kafka consumer metrics
 
 - `kafka.consumer.errors`
-- `kafka.consumer.lag.ms` (distribution summary, p95/p99)
-- `http.server.rate_limit.blocked.count`
+- `kafka.consumer.lag.ms`
+- `kafka.consumer.processed.count`
+- `kafka.consumer.retry.count`
+- `kafka.consumer.dlq.count`
 
-## Tracing details
+## 3) Tracing
 
-Configured in `application.yml`:
+Configured through Micrometer bridge and OTLP endpoint:
 
-- `management.tracing.sampling.probability: 1.0`
-- `management.otlp.tracing.endpoint: http://localhost:4318/v1/traces`
+- `management.tracing.sampling.probability`
+- `management.otlp.tracing.endpoint`
 
-This enables trace export through the Micrometer bridge to OTLP.
+Use traces + request_id for end-to-end debugging.
 
-## Runtime resilience mechanisms
+## 4) Reliability and retry behavior
 
-### Producer resilience (`KafkaEventPublisher`)
+### OutboxPublisher
 
-- Retries synchronous send with exponential backoff.
-- Opens local circuit after configured consecutive failures.
-- Resets circuit after configured cool-down.
-- Throws `InfrastructureException` when publish fails.
+- Polls pending/failed rows
+- Exponential backoff based on retry count
+- Bounded retries (max retries)
+- `SENT` / `FAILED` state transitions tracked in DB
 
-### Consumer resilience (`OrderCreatedConsumer`)
+### Kafka consumer
 
-- Retryable topic strategy with exponential backoff.
-- Delayed processing model:
-  - if event is younger than delay window, throw `DelayedProcessingNotReadyException` to trigger retry later.
-- Wraps transient DB errors as `RetryableProcessingException`.
-- Emits DLT logs through `@DltHandler`.
+- Manual ack mode (`manual_immediate`)
+- Ack only after safe completion
+- Retry topics with exponential backoff and max attempts
+- DLQ handler for terminal failures
 
-### Cache resilience (`RedisCacheProvider`)
+## 5) DLQ operations guidance
 
-- `get/put/evict` operations catch runtime cache exceptions.
-- Cache failures degrade to DB-backed behavior instead of failing request.
+When `kafka.consumer.dlq.count` rises:
 
-### Data integrity resilience
+1. Inspect DLQ logs with `eventId`, `orderId`, topic/partition/offset.
+2. Classify failures:
+   - payload/schema issues
+   - missing order records
+   - persistent downstream failures
+3. Decide replay/ignore policy.
+4. Apply fix and replay if safe.
 
-- Idempotent create with unique idempotency key.
-- Optimistic locking conflict handling on updates/cancel.
-- Event processing dedupe via `processed_events` unique key.
+## 6) Real-world monitoring scenarios
 
-## Security and edge protections
+### Scenario: Kafka outage
 
-- JWT authentication and role-based authorization (`SecurityConfig`)
-- Validation at DTO/controller boundary
-- Rate limiting with fixed window + per-route/per-subject keying
+Symptoms:
 
-## Operations checklist
+- rising `outbox.pending.count`
+- rising `outbox.failure.count`
+- stable API latency (writes still commit)
 
-- Ensure Kafka is reachable at configured bootstrap server.
-- Set strong `JWT_SECRET` in production.
-- Scrape `/actuator/prometheus` from Prometheus.
-- Export traces to OTEL collector endpoint.
-- Monitor key signals:
-  - rising `kafka.consumer.errors`
-  - rising `orders.operation.failure.count`
-  - high `kafka.consumer.lag.ms`
-  - high `http.server.rate_limit.blocked.count`
+Action:
+
+- restore Kafka
+- confirm outbox drain by falling pending/failure gauges
+
+### Scenario: Redis instability
+
+Symptoms:
+
+- rising `cache.error.count`
+- possibly rising DB read load
+
+Action:
+
+- restore Redis
+- verify cache hits recover
+
+### Scenario: abusive traffic or bot spikes
+
+Symptoms:
+
+- rising `rate_limit.blocked.count`
+
+Action:
+
+- tune token bucket limits/window
+- add edge/WAF controls if needed
+
+### Scenario: consumer retry storm
+
+Symptoms:
+
+- rising `kafka.consumer.retry.count`
+- lag rising
+- potential DLQ increase
+
+Action:
+
+- inspect root cause class of retries
+- verify retry bounds and delay settings
+- scale consumers / fix downstream dependency
+
+## 7) Runbook checkpoints
+
+- Verify Kafka connectivity and topic health.
+- Verify Redis availability and latency.
+- Verify Prometheus scraping `/actuator/prometheus`.
+- Verify trace export endpoint and sampling settings.
+- Verify outbox backlog and DLQ trends on deployments.
+
