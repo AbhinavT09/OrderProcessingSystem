@@ -1,9 +1,9 @@
 package com.example.orderprocessing.application.service;
 
-import com.example.orderprocessing.api.dto.OrderItemRequest;
-import com.example.orderprocessing.api.dto.OrderResponse;
-import com.example.orderprocessing.domain.model.Order;
-import com.example.orderprocessing.domain.model.OrderItem;
+import com.example.orderprocessing.interfaces.http.dto.OrderItemRequest;
+import com.example.orderprocessing.interfaces.http.dto.OrderResponse;
+import com.example.orderprocessing.domain.order.Order;
+import com.example.orderprocessing.domain.order.OrderItem;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderItemEmbeddable;
 import java.util.List;

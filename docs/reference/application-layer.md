@@ -4,7 +4,7 @@
 
 ### `OrderService` (command/write side)
 - Enforces regional write gate via `RegionalFailoverManager.allowsWrites()`.
-- Uses `GlobalIdempotencyService` lock + completed mapping to prevent cross-region duplicate creation.
+- Uses crosscutting `GlobalIdempotencyService` lock + completed mapping to prevent cross-region duplicate creation.
 - Writes `OrderEntity` and outbox event through `OutboxService` (no direct Kafka call in write transaction).
 - Invalidates cache entries after writes (`order:id:*` and status lists).
 

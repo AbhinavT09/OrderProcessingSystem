@@ -1,6 +1,6 @@
 package com.example.orderprocessing.infrastructure.web;
 
-import com.example.orderprocessing.api.error.ApiError;
+import com.example.orderprocessing.interfaces.http.error.ApiError;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;

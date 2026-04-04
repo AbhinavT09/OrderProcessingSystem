@@ -1,6 +1,6 @@
 package com.example.orderprocessing.infrastructure.persistence.repository;
 
-import com.example.orderprocessing.domain.model.OrderStatus;
+import com.example.orderprocessing.domain.order.OrderStatus;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import java.util.List;
 import java.util.Optional;

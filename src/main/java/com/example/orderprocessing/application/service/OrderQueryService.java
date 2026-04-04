@@ -1,10 +1,10 @@
 package com.example.orderprocessing.application.service;
 
-import com.example.orderprocessing.api.dto.OrderResponse;
+import com.example.orderprocessing.interfaces.http.dto.OrderResponse;
 import com.example.orderprocessing.application.exception.NotFoundException;
 import com.example.orderprocessing.application.port.CacheProvider;
 import com.example.orderprocessing.application.port.OrderRepository;
-import com.example.orderprocessing.domain.model.OrderStatus;
+import com.example.orderprocessing.domain.order.OrderStatus;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Counter;

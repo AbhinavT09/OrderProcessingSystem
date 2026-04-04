@@ -7,7 +7,7 @@ The project uses **Hexagonal Architecture + CQRS + DDD Aggregate**:
 - **Domain layer:** business invariants and state transitions only
 - **Application layer:** use-case orchestration and ports
 - **Infrastructure layer:** Kafka, Redis, persistence, filters, security adapters, resilience/idempotency modules
-- **API layer:** HTTP transport + DTO + exception mapping
+- **Interface layer (HTTP):** HTTP transport + DTO + exception mapping
 
 CQRS split:
 

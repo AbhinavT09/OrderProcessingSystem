@@ -1,6 +1,6 @@
 package com.example.orderprocessing.application.service;
 
-import com.example.orderprocessing.api.dto.OrderResponse;
+import com.example.orderprocessing.interfaces.http.dto.OrderResponse;
 import java.util.List;
 
 /**

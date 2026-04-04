@@ -1,5 +1,10 @@
 # Domain Layer Reference
 
+Package location:
+
+- `domain/order` for aggregate/value types.
+- `domain/order/state` for state strategy hierarchy.
+
 ## Aggregate and value objects
 
 ### `Order`

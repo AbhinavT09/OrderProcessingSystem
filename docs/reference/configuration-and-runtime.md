@@ -1,5 +1,12 @@
 # Configuration and Runtime Controls
 
+## Configuration package layout
+
+- `config/security/SecurityConfig` - JWT resource server, RBAC routes, JSON auth error handlers.
+- `config/redis/RedisLettuceConfig` - Lettuce client timeout/reconnect tuning.
+- `config/kafka` - reserved package for Kafka-specific configuration classes.
+- `config/observability` - reserved package for observability-specific configuration classes.
+
 ## `application.yml` controls
 
 ### Outbox and publisher

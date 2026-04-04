@@ -24,46 +24,46 @@ This documentation reflects the **current implementation** of the project, inclu
 ```mermaid
 flowchart LR
     Client[API Client] --> SEC[Security Chain]
-    SEC --> API[OrderController]
+    SEC --> API[interfaces/http/controller/OrderController]
 
-    API --> WS[OrderService write]
-    API --> QS[OrderQueryService read]
+    API --> WS[application/service/OrderService]
+    API --> QS[application/service/OrderQueryService]
 
     WS --> ORD[(OrderRepository Port)]
-    ORD --> JPA[PostgresOrderRepository]
+    ORD --> JPA[infrastructure/persistence/adapter/PostgresOrderRepository]
     JPA --> DB[(orders/order_items)]
 
     WS --> OUT[(OutboxRepository Port)]
-    OUT --> OUTJPA[JpaOutboxRepository]
+    OUT --> OUTJPA[infrastructure/persistence/adapter/JpaOutboxRepository]
     OUTJPA --> ODB[(outbox_events)]
 
     subgraph Async Outbox Publish
-      PUB[OutboxPublisher scheduler] --> ODB
-      PUB --> KEP[KafkaEventPublisher]
-      KEP --> SR[VersionedJsonSchemaRegistry]
+      PUB[infrastructure/messaging/OutboxPublisher] --> ODB
+      PUB --> KEP[infrastructure/messaging/producer/KafkaEventPublisher]
+      KEP --> SR[infrastructure/messaging/schema/VersionedJsonOrderCreatedEventSchemaRegistry]
       KEP --> K[(Kafka order.events)]
     end
 
-    K --> KC[OrderCreatedConsumer]
+    K --> KC[infrastructure/messaging/consumer/OrderCreatedConsumer]
     KC --> SR
     KC --> PR[(ProcessedEventRepository Port)]
-    PR --> PRJPA[JpaProcessedEventRepository]
+    PR --> PRJPA[infrastructure/persistence/adapter/JpaProcessedEventRepository]
     PRJPA --> PDB[(processed_events)]
     KC --> DB
 
     QS --> CP[(CacheProvider Port)]
-    CP --> RCP[RedisCacheProvider]
+    CP --> RCP[infrastructure/cache/RedisCacheProvider]
     RCP --> REDIS[(Redis)]
     RCP --> CB[Redis Circuit Breaker]
 
-    SEC --> RL[RateLimitingFilter Redis Token Bucket]
-    SEC --> RC[RequestContextFilter]
-    SEC --> JWT[JWT auth + RBAC]
+    SEC --> RL[infrastructure/web/RateLimitingFilter]
+    SEC --> RC[infrastructure/web/RequestContextFilter]
+    SEC --> JWT[config/security/SecurityConfig + RoleClaimJwtAuthenticationConverter]
 
     RC --> RMDC[region_id in logs and metrics]
-    WS --> GID[GlobalIdempotencyService]
-    WS --> RFM[RegionalFailoverManager]
-    RFM --> HC[MultiRegionHealthIndicator]
+    WS --> GID[infrastructure/crosscutting/GlobalIdempotencyService]
+    WS --> RFM[infrastructure/resilience/RegionalFailoverManager]
+    RFM --> HC[infrastructure/resilience/MultiRegionHealthIndicator]
 ```
 
 ### State transition model
@@ -90,10 +90,10 @@ stateDiagram-v2
 sequenceDiagram
     autonumber
     participant C as Client
-    participant OS as OrderService
+    participant OS as application/service/OrderService
     participant DB as Orders DB
     participant ODB as Outbox DB
-    participant OP as OutboxPublisher
+    participant OP as infrastructure/messaging/OutboxPublisher
     participant K as Kafka
 
     C->>OS: create order
@@ -117,11 +117,11 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant HM as RegionalFailoverManager
+    participant HM as infrastructure/resilience/RegionalFailoverManager
     participant DB as Database
     participant R as Redis
     participant K as Kafka
-    participant OS as OrderService
+    participant OS as application/service/OrderService
 
     loop every poll interval
       HM->>DB: health check
@@ -146,13 +146,13 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    E[OrderCreatedEvent] --> V{schemaVersion present?}
+    E[application/event/OrderCreatedEvent] --> V{schemaVersion present?}
     V -- no --> D[Default to v1 parse rules]
     V -- yes --> C[Validate supported/forward-compatible version]
     D --> S[Validate required fields]
     C --> S
-    S --> P[Producer/Outbox serialize + publish]
-    S --> Q[Consumer deserialize + process]
+    S --> P[infrastructure/messaging/producer + outbox publish]
+    S --> Q[infrastructure/messaging/consumer deserialize + process]
     S --> M[kafka.event.version.distribution]
     S -->|invalid payload| ERR[kafka.schema.validation.errors++]
 ```

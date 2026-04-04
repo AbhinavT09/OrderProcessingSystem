@@ -2,9 +2,9 @@
 
 ## Component-level design with real-world examples
 
-### API boundary
+### Interface HTTP boundary
 
-- `OrderController` + DTOs isolate transport concerns from core logic.
+- `interfaces/http` (`OrderController` + DTOs) isolates transport concerns from core logic.
 - `GlobalExceptionHandler` ensures stable error contract regardless of internal exception source.
 
 Real-world example:

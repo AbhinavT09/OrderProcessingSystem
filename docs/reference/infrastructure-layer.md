@@ -2,6 +2,13 @@
 
 ## Messaging and outbox pipeline
 
+Package split:
+
+- `infrastructure/messaging/producer` (`KafkaEventPublisher`)
+- `infrastructure/messaging/consumer` (`OrderCreatedConsumer`)
+- `infrastructure/messaging/schema` (schema registry and validation)
+- `infrastructure/messaging` (outbox orchestration/shared messaging types)
+
 ### Outbox component split
 - `OutboxPublisher`: scheduler/coordinator; computes owned partitions, enforces max in-flight semaphore, dispatches worker tasks, refreshes pending/failure gauges, archives old `SENT` records.
 - `OutboxFetcher`: transactional row claiming (`claimBatchForPartition`), deterministic in-partition ordering by aggregate then created time, batch-size metric recording.
@@ -44,4 +51,4 @@
 ## Web/security infrastructure
 - `RequestContextFilter`: request/region context propagation in MDC and regional request metrics.
 - `RateLimitingFilter`: Redis Lua token bucket keyed by user/path/ip with fail-open behavior.
-- `SecurityConfig` + `RoleClaimJwtAuthenticationConverter`: JWT auth, role mapping, route RBAC, JSON 401/403 responses.
+- `RoleClaimJwtAuthenticationConverter`: JWT role-claim mapping helper.

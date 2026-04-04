@@ -1,7 +1,7 @@
 package com.example.orderprocessing.infrastructure.persistence.adapter;
 
 import com.example.orderprocessing.application.port.OrderRepository;
-import com.example.orderprocessing.domain.model.OrderStatus;
+import com.example.orderprocessing.domain.order.OrderStatus;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import com.example.orderprocessing.infrastructure.persistence.repository.SpringOrderJpaRepository;
 import java.util.List;

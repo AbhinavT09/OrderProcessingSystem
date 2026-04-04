@@ -1,4 +1,8 @@
-# API Layer Reference
+# Interface HTTP Layer Reference
+
+## Package location
+
+`src/main/java/com/example/orderprocessing/interfaces/http`
 
 ## Controllers
 
@@ -13,3 +17,10 @@
 - `CreateOrderRequest`, `OrderItemRequest`, `UpdateOrderStatusRequest`, `OrderResponse` define transport contracts.
 - `ApiError` is the stable error schema (`code`, `message`, `requestId`, `timestamp`).
 - `GlobalExceptionHandler` maps domain/infrastructure exceptions to deterministic HTTP status codes.
+
+## Sub-packages
+
+- `interfaces/http/controller`
+- `interfaces/http/dto`
+- `interfaces/http/error`
+- `interfaces/http/exception`

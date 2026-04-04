@@ -1,16 +1,16 @@
 package com.example.orderprocessing.application.service;
 
-import com.example.orderprocessing.api.dto.CreateOrderRequest;
-import com.example.orderprocessing.api.dto.OrderResponse;
+import com.example.orderprocessing.interfaces.http.dto.CreateOrderRequest;
+import com.example.orderprocessing.interfaces.http.dto.OrderResponse;
 import com.example.orderprocessing.application.event.OrderCreatedEvent;
 import com.example.orderprocessing.application.exception.ConflictException;
 import com.example.orderprocessing.application.exception.InfrastructureException;
 import com.example.orderprocessing.application.exception.NotFoundException;
 import com.example.orderprocessing.application.port.CacheProvider;
 import com.example.orderprocessing.application.port.OrderRepository;
-import com.example.orderprocessing.domain.model.Order;
-import com.example.orderprocessing.domain.model.OrderStatus;
-import com.example.orderprocessing.infrastructure.idempotency.GlobalIdempotencyService;
+import com.example.orderprocessing.domain.order.Order;
+import com.example.orderprocessing.domain.order.OrderStatus;
+import com.example.orderprocessing.infrastructure.crosscutting.GlobalIdempotencyService;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import com.example.orderprocessing.infrastructure.resilience.RegionalFailoverManager;
 import io.micrometer.core.instrument.Counter;

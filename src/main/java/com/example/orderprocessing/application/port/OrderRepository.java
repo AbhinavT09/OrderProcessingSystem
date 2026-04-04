@@ -1,6 +1,6 @@
 package com.example.orderprocessing.application.port;
 
-import com.example.orderprocessing.domain.model.OrderStatus;
+import com.example.orderprocessing.domain.order.OrderStatus;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import java.util.List;
 import java.util.Optional;

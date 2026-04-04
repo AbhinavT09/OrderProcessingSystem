@@ -1,6 +1,6 @@
 package com.example.orderprocessing.infrastructure.persistence.entity;
 
-import com.example.orderprocessing.domain.model.OrderStatus;
+import com.example.orderprocessing.domain.order.OrderStatus;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
