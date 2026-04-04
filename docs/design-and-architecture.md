@@ -121,3 +121,71 @@ Order transition logic is delegated to `OrderState` implementations:
 - Route-level RBAC in `SecurityConfig`.
 - Rate limiter as servlet filter before auth chain.
 - Request correlation middleware sets/propagates `X-Request-Id`.
+
+## Additional interactive design docs
+
+### Sequence: create order and delayed processing
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant OC as OrderController
+    participant OS as OrderService
+    participant OR as OrderRepository
+    participant EP as EventPublisher/KafkaEventPublisher
+    participant K as Kafka
+    participant KC as OrderCreatedConsumer
+    participant PER as ProcessedEventRepository
+
+    C->>OC: POST /orders (+ X-Idempotency-Key)
+    OC->>OS: createOrder(request, key)
+    OS->>OR: save(order=PENDING)
+    OR-->>OS: saved OrderEntity
+    OS->>EP: publishOrderCreated(event)
+    EP->>K: send(topic=order.events, key=orderId)
+    OS-->>OC: 201 OrderResponse
+    OC-->>C: Created
+
+    K-->>KC: consume(event payload)
+    KC->>PER: existsByEventId(eventId)?
+    alt not processed and delay elapsed
+        KC->>OR: findById(orderId)
+        KC->>OR: save(order=PROCESSING)
+        KC->>PER: save(processed marker)
+    else already processed
+        KC-->>KC: skip duplicate safely
+    else not ready yet
+        KC-->>K: throw DelayedProcessingNotReadyException (retry later)
+    end
+```
+
+### Security request path and policy enforcement
+
+```mermaid
+flowchart LR
+    REQ[Incoming HTTP request] --> RL[RateLimitingFilter]
+    RL --> RC[RequestContextFilter]
+    RC --> JWT[JWT Authentication]
+    JWT --> RBAC[Route RBAC checks]
+    RBAC --> CTRL[OrderController]
+
+    RBAC -->|No token / invalid token| U401[401 UNAUTHORIZED JSON ApiError]
+    RBAC -->|Insufficient role| U403[403 FORBIDDEN JSON ApiError]
+    RL -->|Over limit| U429[429 RATE_LIMITED JSON ApiError]
+```
+
+### Cache-aside and stampede-control behavior
+
+```mermaid
+flowchart TD
+    RQ[Read request] --> CK{Cache hit?}
+    CK -- Yes --> RET[Return cached response]
+    CK -- No --> LK[Acquire key lock]
+    LK --> RECHK{Cache filled by other thread?}
+    RECHK -- Yes --> RET
+    RECHK -- No --> DB[Load from repository]
+    DB --> PUT[Put in cache]
+    PUT --> UNLK[Release lock]
+    UNLK --> RET
+```

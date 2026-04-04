@@ -131,3 +131,128 @@ Used for local development simplicity (no external DB dependency).
 ### Maven
 
 Used for build lifecycle, dependency management, and reproducible test runs.
+
+## Individual tool sections with real-time examples
+
+### Tool: Spring Boot
+
+**Why used**
+- Provides auto-configuration, dependency injection, actuator, and production-ready web bootstrapping.
+
+**Real-time example**
+- At startup, `OrderProcessingApplication` boots `OrderController`, `OrderService`, and `SecurityConfig` automatically.
+- A `POST /orders` request reaches a fully wired stack (controller -> service -> repository) without manual object graph creation.
+
+### Tool: Spring Web (MVC)
+
+**Why used**
+- Implements HTTP API endpoints with declarative routing and request/response binding.
+
+**Real-time example**
+- `OrderController#create` accepts JSON body and `X-Idempotency-Key` header, validates inputs, and returns `201` with structured order payload.
+
+### Tool: Spring Data JPA + Hibernate
+
+**Why used**
+- Handles relational persistence and optimistic locking with minimal boilerplate.
+
+**Real-time example**
+- Two clients patch the same order status with different versions.
+- The stale version triggers an optimistic lock conflict and the API returns `409 CONFLICT`.
+
+### Tool: H2 Database
+
+**Why used**
+- Lightweight runtime DB for local development and test environments.
+
+**Real-time example**
+- Running `mvn clean test` spins up H2 in-memory using `jdbc:h2:mem:ordersdb`, allowing integration tests to run without external DB setup.
+
+### Tool: Kafka
+
+**Why used**
+- Decouples synchronous order creation from delayed status progression.
+- Supports reliable retries and scalable asynchronous consumers.
+
+**Real-time example**
+- On order creation, `OrderService` publishes `OrderCreatedEvent`.
+- `OrderCreatedConsumer` receives the event and only promotes `PENDING -> PROCESSING` after delay window is satisfied.
+
+### Tool: Spring Kafka + Retryable Topics
+
+**Why used**
+- Adds retry and dead-letter behavior around consumer logic.
+
+**Real-time example**
+- If DB is temporarily unavailable, consumer throws `RetryableProcessingException`.
+- Message is retried with exponential backoff; persistent failure routes to DLT handler.
+
+### Tool: Spring Retry
+
+**Why used**
+- Enables retry semantics for transient failures in selected flows.
+
+**Real-time example**
+- Publisher retry loop plus delayed consumer retries absorb short-lived infrastructure glitches without immediate request/data loss.
+
+### Tool: Spring Security + OAuth2 Resource Server
+
+**Why used**
+- Validates JWTs and enforces route-level RBAC for production API hardening.
+
+**Real-time example**
+- A token with `ROLE_USER` can create and read orders.
+- The same token receives `403 FORBIDDEN` when trying `PATCH /orders/{id}/status` (admin-only route).
+
+### Tool: JWT (HMAC via NimbusJwtDecoder)
+
+**Why used**
+- Stateless auth model suitable for horizontally scaled APIs.
+
+**Real-time example**
+- Incoming bearer token is validated against `app.security.jwt-secret`.
+- `RoleClaimJwtAuthenticationConverter` maps JWT `roles` claim to authorities used by route authorization checks.
+
+### Tool: Micrometer + Prometheus
+
+**Why used**
+- Captures runtime performance/reliability metrics and exports for dashboards/alerts.
+
+**Real-time example**
+- A spike in failed Kafka processing increments `kafka.consumer.errors`.
+- Prometheus scrape detects trend; alert can trigger before customer-visible degradation.
+
+### Tool: OpenTelemetry (via Micrometer tracing bridge)
+
+**Why used**
+- Provides end-to-end request trace context across filters/services.
+
+**Real-time example**
+- A slow request trace shows time spent in controller, service, and DB operation, correlated by `trace_id` in logs.
+
+### Tool: Logback + MDC Structured JSON logs
+
+**Why used**
+- Produces machine-parsable logs with request/order correlation fields.
+
+**Real-time example**
+- Production incident investigation filters logs by `request_id` and `order_id` to reconstruct one order's full lifecycle quickly.
+
+### Tool: Bean Validation (Jakarta Validation)
+
+**Why used**
+- Enforces API contract constraints at boundary before business processing.
+
+**Real-time example**
+- A create payload with empty items and oversized idempotency key fails fast with `400 VALIDATION_FAILED`, avoiding partial processing.
+
+### Tool: Maven Surefire + JUnit 5 + Spring Test
+
+**Why used**
+- Runs layered tests (unit/integration/contract) in a repeatable CI-friendly lifecycle.
+
+**Real-time example**
+- `mvn clean test` executes:
+  - domain state-machine tests,
+  - API integration tests with security,
+  - Kafka event contract tests.

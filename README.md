@@ -28,3 +28,6 @@ mvn spring-boot:run
 - `GET /orders?status=...`
 - `PATCH /orders/{id}/status`
 - `PATCH /orders/{id}/cancel`
+
+## Documentation
+- Project docs index (GitHub Pages): [docs/index.md](./docs/index.md)
