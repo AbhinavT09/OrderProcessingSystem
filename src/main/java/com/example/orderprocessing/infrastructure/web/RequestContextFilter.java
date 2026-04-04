@@ -15,6 +15,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 @Component("requestIdFilter")
+/**
+ * RequestContextFilter implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class RequestContextFilter extends OncePerRequestFilter {
 
     public static final String REQUEST_ID = "request_id";
@@ -25,6 +29,11 @@ public class RequestContextFilter extends OncePerRequestFilter {
     private final Timer requestLatencyTimer;
     private final String defaultRegionId;
 
+    /**
+     * Creates request-context and region-tagging filter.
+     * @param meterRegistry metrics registry
+     * @param regionId configured region identifier
+     */
     public RequestContextFilter(MeterRegistry meterRegistry,
                                 @Value("${app.multi-region.region-id:region-a}") String defaultRegionId) {
         this.meterRegistry = meterRegistry;

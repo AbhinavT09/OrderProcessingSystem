@@ -26,10 +26,14 @@ import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.kafka.retrytopic.DltStrategy;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.messaging.handler.annotation.Header;
 
 @Component
+/**
+ * OrderCreatedConsumer implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class OrderCreatedConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(OrderCreatedConsumer.class);
@@ -43,16 +47,26 @@ public class OrderCreatedConsumer {
     private final Counter retryCounter;
     private final Counter dlqCounter;
     private final DistributionSummary kafkaLagMsSummary;
+    private final TransactionTemplate transactionTemplate;
 
+    /**
+     * Creates the order-created Kafka consumer.
+     * @param schemaRegistry schema parser/validator
+     * @param orderRepository order repository for state transitions
+     * @param processedEventRepository deduplication store
+     * @param meterRegistry metrics registry
+     */
     public OrderCreatedConsumer(OrderCreatedEventSchemaRegistry schemaRegistry,
                                 OrderRepository orderRepository,
                                 ProcessedEventRepository processedEventRepository,
                                 OrderMapper orderMapper,
-                                MeterRegistry meterRegistry) {
+                                MeterRegistry meterRegistry,
+                                TransactionTemplate transactionTemplate) {
         this.schemaRegistry = schemaRegistry;
         this.orderRepository = orderRepository;
         this.processedEventRepository = processedEventRepository;
         this.orderMapper = orderMapper;
+        this.transactionTemplate = transactionTemplate;
         this.consumeErrorCounter = meterRegistry.counter("kafka.consumer.errors");
         this.processedCounter = meterRegistry.counter("kafka.consumer.processed.count");
         this.retryCounter = meterRegistry.counter("kafka.consumer.retry.count");
@@ -76,47 +90,33 @@ public class OrderCreatedConsumer {
             dltStrategy = DltStrategy.FAIL_ON_ERROR
     )
     @KafkaListener(topics = "${app.kafka.order-events-topic:order.events}", groupId = "${app.kafka.consumer-group:order-processing-group}")
-    @Transactional
+    /**
+     * Executes consume.
+     * @param payload input argument used by this operation
+     * @param acknowledgment input argument used by this operation
+     */
     public void consume(String payload, Acknowledgment acknowledgment) {
         try {
             OrderCreatedEvent event = parse(payload);
-
-            if (processedEventRepository.existsByEventId(event.eventId())) {
-                log.info("Skipping already processed event eventId={} orderId={}", event.eventId(), event.orderId());
-                acknowledgment.acknowledge();
-                return;
-            }
-
             Instant occurredAt = Instant.parse(event.occurredAt());
             kafkaLagMsSummary.record(Math.max(0, Instant.now().toEpochMilli() - occurredAt.toEpochMilli()));
             if (Instant.now().isBefore(occurredAt.plus(5, ChronoUnit.MINUTES))) {
-                retryCounter.increment();
                 throw new DelayedProcessingNotReadyException(
                         "OrderCreated event is not ready for processing yet: " + event.eventId());
             }
-
-            Optional<OrderEntity> entity = orderRepository.findById(UUID.fromString(event.orderId()));
-            if (entity.isEmpty()) {
-                log.warn("Order not found for consumed event eventId={} orderId={}", event.eventId(), event.orderId());
-                persistProcessed(event);
-                processedCounter.increment();
+            processEventInTransaction(event);
+            processedCounter.increment();
+            acknowledgment.acknowledge();
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            if (isDuplicateProcessedMarkerViolation(ex)) {
+                // Unique processed-event marker race: treat as already processed and ack.
+                log.info("Processed marker race handled as duplicate reason={}", ex.toString());
                 acknowledgment.acknowledge();
                 return;
             }
-
-            Order order = orderMapper.toDomain(entity.get());
-            if (order.promotePendingToProcessing()) {
-                orderRepository.save(orderMapper.toEntity(order));
-                log.info("Processed OrderCreated event; order promoted to PROCESSING orderId={} eventId={}",
-                        event.orderId(), event.eventId());
-            } else {
-                log.info("Order already progressed, skipping transition orderId={} eventId={}",
-                        event.orderId(), event.eventId());
-            }
-
-            persistProcessed(event);
-            processedCounter.increment();
-            acknowledgment.acknowledge();
+            consumeErrorCounter.increment();
+            retryCounter.increment();
+            throw new RetryableProcessingException("Data integrity violation while processing event", ex);
         } catch (DataAccessException ex) {
             consumeErrorCounter.increment();
             retryCounter.increment();
@@ -132,6 +132,13 @@ public class OrderCreatedConsumer {
     }
 
     @DltHandler
+    /**
+     * Handles terminally failed records routed to the dead-letter topic.
+     * @param payload dead-letter payload
+     * @param offset Kafka record offset
+     * @param partition Kafka partition
+     * @param topic dead-letter topic name
+     */
     public void onDlt(
             String payload,
             @Header(value = KafkaHeaders.RECEIVED_TOPIC, required = false) String topic,
@@ -160,7 +167,48 @@ public class OrderCreatedConsumer {
         processedEventRepository.save(processed);
     }
 
+    private void processEventInTransaction(OrderCreatedEvent event) {
+        transactionTemplate.executeWithoutResult(status -> {
+            if (processedEventRepository.existsByEventId(event.eventId())) {
+                log.info("Skipping already processed event eventId={} orderId={}", event.eventId(), event.orderId());
+                return;
+            }
+
+            Optional<OrderEntity> entity = orderRepository.findById(UUID.fromString(event.orderId()));
+            if (entity.isEmpty()) {
+                log.warn("Order not found for consumed event eventId={} orderId={}", event.eventId(), event.orderId());
+                persistProcessed(event);
+                return;
+            }
+
+            Order order = orderMapper.toDomain(entity.get());
+            if (order.promotePendingToProcessing()) {
+                orderRepository.save(orderMapper.toEntity(order));
+                log.info("Processed OrderCreated event; order promoted to PROCESSING orderId={} eventId={}",
+                        event.orderId(), event.eventId());
+            } else {
+                log.info("Order already progressed, skipping transition orderId={} eventId={}",
+                        event.orderId(), event.eventId());
+            }
+
+            persistProcessed(event);
+        });
+    }
+
     private OrderCreatedEvent parse(String payload) {
         return schemaRegistry.deserialize(payload);
+    }
+
+    private boolean isDuplicateProcessedMarkerViolation(org.springframework.dao.DataIntegrityViolationException ex) {
+        String message = ex.getMostSpecificCause() != null
+                ? ex.getMostSpecificCause().getMessage()
+                : ex.getMessage();
+        if (message == null) {
+            return false;
+        }
+        String normalized = message.toLowerCase();
+        return normalized.contains("uk_processed_event_id")
+                || (normalized.contains("processed_events") && normalized.contains("eventid"))
+                || normalized.contains("duplicate") && normalized.contains("eventid");
     }
 }

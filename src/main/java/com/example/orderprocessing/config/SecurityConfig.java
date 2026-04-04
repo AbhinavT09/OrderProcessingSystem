@@ -25,15 +25,30 @@ import org.springframework.security.oauth2.server.resource.web.authentication.Be
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
+/**
+ * SecurityConfig implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class SecurityConfig {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * Creates security configuration dependencies.
+     * @param objectMapper mapper used for JSON error responses
+     */
     public SecurityConfig(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
     @Bean
+    /**
+     * Builds the security filter chain for API endpoints.
+     * @param http HTTP security builder
+     * @param rateLimitingFilter redis-backed rate limiting filter
+     * @return configured security filter chain
+     * @throws Exception when security configuration fails
+     */
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
                                                    RateLimitingFilter rateLimitingFilter) throws Exception {
         return http
@@ -74,6 +89,11 @@ public class SecurityConfig {
     }
 
     @Bean
+    /**
+     * Builds the JWT decoder from the shared HMAC secret.
+     * @param jwtSecret configured secret source value
+     * @return JWT decoder for bearer token validation
+     */
     public JwtDecoder jwtDecoder(@Value("${app.security.jwt-secret}") String jwtSecret) {
         byte[] secret = Arrays.copyOf(jwtSecret.getBytes(StandardCharsets.UTF_8), 32);
         SecretKeySpec key = new SecretKeySpec(secret, "HmacSHA256");

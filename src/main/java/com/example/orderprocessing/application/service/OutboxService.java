@@ -10,12 +10,22 @@ import java.time.Instant;
 import org.springframework.stereotype.Service;
 
 @Service
+/**
+ * OutboxService implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class OutboxService {
 
     private final OutboxRepository outboxRepository;
     private final OrderCreatedEventSchemaRegistry schemaRegistry;
     private final int totalPartitions;
 
+    /**
+     * Creates the outbox write helper.
+     * @param outboxRepository outbox persistence port
+     * @param objectMapper JSON serializer for payloads
+     * @param schemaRegistry schema registry for payload validation
+     */
     public OutboxService(OutboxRepository outboxRepository,
                          OrderCreatedEventSchemaRegistry schemaRegistry,
                          @Value("${app.outbox.partition.total:64}") int totalPartitions) {
@@ -24,6 +34,11 @@ public class OutboxService {
         this.totalPartitions = Math.max(1, totalPartitions);
     }
 
+    /**
+     * Executes enqueueOrderCreated.
+     * @param orderId input argument used by this operation
+     * @param event input argument used by this operation
+     */
     public void enqueueOrderCreated(String orderId, OrderCreatedEvent event) {
         OutboxEntity outbox = new OutboxEntity();
         outbox.setAggregateType("ORDER");

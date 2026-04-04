@@ -11,6 +11,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 @Component
+/**
+ * GlobalIdempotencyService implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class GlobalIdempotencyService {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalIdempotencyService.class);
@@ -20,6 +24,12 @@ public class GlobalIdempotencyService {
     private final Duration completedTtl;
     private final boolean enabled;
 
+    /**
+     * Creates the global idempotency coordinator.
+     * @param redisTemplate redis template for lock and mapping keys
+     * @param lockTtl lock TTL duration
+     * @param completedTtl completed mapping TTL duration
+     */
     public GlobalIdempotencyService(
             StringRedisTemplate redisTemplate,
             @Value("${app.multi-region.global-idempotency.enabled:true}") boolean enabled,
@@ -31,6 +41,12 @@ public class GlobalIdempotencyService {
         this.completedTtl = Duration.ofSeconds(Math.max(60, completedTtlSeconds));
     }
 
+    /**
+     * Executes tryAcquire.
+     * @param idempotencyKey input argument used by this operation
+     * @param ownerToken input argument used by this operation
+     * @return operation result
+     */
     public boolean tryAcquire(String idempotencyKey, String ownerToken) {
         if (!enabled || idempotencyKey == null) {
             return true;
@@ -45,6 +61,11 @@ public class GlobalIdempotencyService {
         }
     }
 
+    /**
+     * Executes resolveCompletedOrderId.
+     * @param idempotencyKey input argument used by this operation
+     * @return operation result
+     */
     public Optional<UUID> resolveCompletedOrderId(String idempotencyKey) {
         if (!enabled || idempotencyKey == null) {
             return Optional.empty();
@@ -61,6 +82,11 @@ public class GlobalIdempotencyService {
         }
     }
 
+    /**
+     * Executes markCompleted.
+     * @param idempotencyKey input argument used by this operation
+     * @param orderId input argument used by this operation
+     */
     public void markCompleted(String idempotencyKey, UUID orderId) {
         if (!enabled || idempotencyKey == null || orderId == null) {
             return;

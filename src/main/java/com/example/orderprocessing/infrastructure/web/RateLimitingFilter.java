@@ -24,6 +24,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 @Component
+/**
+ * RateLimitingFilter implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class RateLimitingFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitingFilter.class);
@@ -72,6 +76,14 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     private final long windowMs;
     private final double refillPerMs;
 
+    /**
+     * Creates the distributed token-bucket rate limiting filter.
+     * @param redisTemplate redis template for Lua script execution
+     * @param objectMapper object mapper for error payloads
+     * @param meterRegistry metrics registry
+     * @param defaultLimit default token limit
+     * @param defaultWindowSeconds token refill window in seconds
+     */
     public RateLimitingFilter(StringRedisTemplate redisTemplate,
                               ObjectMapper objectMapper,
                               MeterRegistry meterRegistry,

@@ -10,12 +10,26 @@ import java.util.List;
 import org.springframework.stereotype.Component;
 
 @Component
+/**
+ * OrderMapper implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class OrderMapper {
 
+    /**
+     * Executes toDomainItems.
+     * @param items input argument used by this operation
+     * @return operation result
+     */
     public List<OrderItem> toDomainItems(List<OrderItemRequest> items) {
         return items.stream().map(item -> new OrderItem(item.productName(), item.quantity(), item.price())).toList();
     }
 
+    /**
+     * Executes toDomain.
+     * @param entity input argument used by this operation
+     * @return operation result
+     */
     public Order toDomain(OrderEntity entity) {
         List<OrderItem> items = entity.getItems().stream()
                 .map(i -> new OrderItem(i.getProductName(), i.getQuantity(), i.getPrice()))
@@ -29,6 +43,11 @@ public class OrderMapper {
                 entity.getVersion());
     }
 
+    /**
+     * Executes toEntity.
+     * @param domain input argument used by this operation
+     * @return operation result
+     */
     public OrderEntity toEntity(Order domain) {
         OrderEntity entity = new OrderEntity();
         entity.setId(domain.getId());
@@ -40,6 +59,11 @@ public class OrderMapper {
         return entity;
     }
 
+    /**
+     * Executes toResponse.
+     * @param domain input argument used by this operation
+     * @return operation result
+     */
     public OrderResponse toResponse(Order domain) {
         List<OrderItemRequest> items = domain.getItems().stream()
                 .map(i -> new OrderItemRequest(i.productName(), i.quantity(), i.price()))

@@ -18,6 +18,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 @Component
+/**
+ * RedisCacheProvider implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class RedisCacheProvider implements CacheProvider {
 
     private static final Logger log = LoggerFactory.getLogger(RedisCacheProvider.class);
@@ -38,6 +42,14 @@ public class RedisCacheProvider implements CacheProvider {
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
     private volatile Instant circuitOpenedAt;
 
+    /**
+     * Creates the Redis cache provider with resilience controls.
+     * @param redisTemplate redis command template
+     * @param objectMapper JSON serializer/deserializer
+     * @param meterRegistry metrics registry
+     * @param breakerThreshold failures before opening circuit breaker
+     * @param cooldownMillis cooldown window while breaker is open
+     */
     public RedisCacheProvider(StringRedisTemplate redisTemplate,
                               ObjectMapper objectMapper,
                               MeterRegistry meterRegistry,
@@ -60,6 +72,12 @@ public class RedisCacheProvider implements CacheProvider {
     }
 
     @Override
+    /**
+     * Returns  value.
+     * @param key input argument used by this operation
+     * @param type input argument used by this operation
+     * @return operation result
+     */
     public <T> Optional<T> get(String key, Class<T> type) {
         if (isCircuitOpen()) {
             degradedModeCounter.increment();
@@ -91,11 +109,22 @@ public class RedisCacheProvider implements CacheProvider {
     }
 
     @Override
+    /**
+     * Executes put.
+     * @param key input argument used by this operation
+     * @param value input argument used by this operation
+     */
     public void put(String key, Object value) {
         put(key, value, null);
     }
 
     @Override
+    /**
+     * Executes put.
+     * @param key input argument used by this operation
+     * @param value input argument used by this operation
+     * @param ttl input argument used by this operation
+     */
     public void put(String key, Object value, Duration ttl) {
         if (isCircuitOpen()) {
             degradedModeCounter.increment();
@@ -123,6 +152,10 @@ public class RedisCacheProvider implements CacheProvider {
     }
 
     @Override
+    /**
+     * Executes evict.
+     * @param key input argument used by this operation
+     */
     public void evict(String key) {
         if (isCircuitOpen()) {
             degradedModeCounter.increment();

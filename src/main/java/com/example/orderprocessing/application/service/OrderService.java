@@ -28,6 +28,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+/**
+ * OrderService implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class OrderService {
 
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
@@ -44,6 +48,16 @@ public class OrderService {
     private final Counter failureCounter;
     private final Timer operationTimer;
 
+    /**
+     * Creates the write-side order application service.
+     * @param orderRepository order repository port
+     * @param orderMapper mapper used for domain/API conversion
+     * @param outboxService outbox write orchestrator
+     * @param cacheProvider cache provider for invalidation
+     * @param meterRegistry metrics registry
+     * @param regionalFailoverManager region write-gating controller
+     * @param globalIdempotencyService cross-region idempotency coordinator
+     */
     public OrderService(OrderRepository orderRepository,
                         CacheProvider cacheProvider,
                         OutboxService outboxService,
@@ -65,6 +79,12 @@ public class OrderService {
     }
 
     @Transactional
+    /**
+     * Executes createOrder.
+     * @param request input argument used by this operation
+     * @param idempotencyKey input argument used by this operation
+     * @return operation result
+     */
     public OrderResponse createOrder(CreateOrderRequest request, String idempotencyKey) {
         assertWriteAllowed();
         requestCounter.increment();
@@ -134,6 +154,13 @@ public class OrderService {
     }
 
     @Transactional
+    /**
+     * Executes updateStatus.
+     * @param id input argument used by this operation
+     * @param status input argument used by this operation
+     * @param expectedVersion input argument used by this operation
+     * @return operation result
+     */
     public OrderResponse updateStatus(UUID id, OrderStatus status, Long expectedVersion) {
         assertWriteAllowed();
         requestCounter.increment();
@@ -169,6 +196,11 @@ public class OrderService {
     }
 
     @Transactional
+    /**
+     * Executes cancel.
+     * @param id input argument used by this operation
+     * @return operation result
+     */
     public OrderResponse cancel(UUID id) {
         assertWriteAllowed();
         requestCounter.increment();

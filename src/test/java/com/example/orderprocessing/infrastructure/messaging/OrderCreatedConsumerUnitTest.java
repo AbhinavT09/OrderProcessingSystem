@@ -20,6 +20,11 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -40,7 +45,8 @@ class OrderCreatedConsumerUnitTest {
                 orderRepository,
                 processedRepository,
                 new OrderMapper(),
-                meterRegistry);
+                meterRegistry,
+                new TransactionTemplate(new NoopTransactionManager()));
 
         String payload = """
                 {
@@ -119,6 +125,23 @@ class OrderCreatedConsumerUnitTest {
 
         int savedCount() {
             return processed.size();
+        }
+    }
+
+    private static final class NoopTransactionManager implements PlatformTransactionManager {
+        @Override
+        public TransactionStatus getTransaction(TransactionDefinition definition) {
+            return new SimpleTransactionStatus();
+        }
+
+        @Override
+        public void commit(TransactionStatus status) {
+            // no-op
+        }
+
+        @Override
+        public void rollback(TransactionStatus status) {
+            // no-op
         }
     }
 }

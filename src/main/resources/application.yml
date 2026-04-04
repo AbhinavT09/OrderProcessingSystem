@@ -54,6 +54,13 @@ app:
       enabled: ${AUTO_FAILOVER_ENABLED:true}
       poll-ms: ${AUTO_FAILOVER_POLL_MS:5000}
       unhealthy-threshold: ${AUTO_FAILOVER_UNHEALTHY_THRESHOLD:3}
+      healthy-threshold: ${AUTO_FAILOVER_HEALTHY_THRESHOLD:2}
+    health:
+      check-timeout-ms: ${REGION_HEALTH_CHECK_TIMEOUT_MS:2000}
+      redis-latency-threshold-ms: ${REGION_REDIS_HEALTH_LATENCY_THRESHOLD_MS:150}
+      db-failure-threshold: ${REGION_DB_FAILURE_THRESHOLD:2}
+      redis-failure-threshold: ${REGION_REDIS_FAILURE_THRESHOLD:2}
+      kafka-failure-threshold: ${REGION_KAFKA_FAILURE_THRESHOLD:2}
     consistency:
       level: eventual
       conflict-resolution: ${CONFLICT_RESOLUTION:last-write-wins}

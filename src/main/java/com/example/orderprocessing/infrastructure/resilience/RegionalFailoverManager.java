@@ -5,10 +5,13 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Connection;
 import java.time.Duration;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import jakarta.annotation.PreDestroy;
 import javax.sql.DataSource;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.DescribeClusterResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,7 +21,15 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
+/**
+ * RegionalFailoverManager implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class RegionalFailoverManager {
+
+    private enum NodeState {
+        ACTIVE, PASSIVE
+    }
 
     private static final Logger log = LoggerFactory.getLogger(RegionalFailoverManager.class);
 
@@ -27,21 +38,46 @@ public class RegionalFailoverManager {
     private final MeterRegistry meterRegistry;
     private final boolean enabled;
     private final boolean autoFailoverEnabled;
-    private final int unhealthyThreshold;
+    private final int globalUnhealthyThreshold;
+    private final int healthyThresholdToRecover;
+    private final int dbFailureThreshold;
+    private final int redisFailureThreshold;
+    private final int kafkaFailureThreshold;
+    private final long checkTimeoutMs;
+    private final long redisLatencyThresholdMs;
     private final String regionId;
     private final String failoverStrategy;
     private final String kafkaBootstrapServers;
-    private final AtomicReference<String> nodeState;
+    private final AtomicReference<NodeState> nodeState;
     private final AtomicInteger consecutiveUnhealthy = new AtomicInteger(0);
+    private final AtomicInteger consecutiveHealthy = new AtomicInteger(0);
+    private final AtomicInteger dbFailures = new AtomicInteger(0);
+    private final AtomicInteger redisFailures = new AtomicInteger(0);
+    private final AtomicInteger kafkaFailures = new AtomicInteger(0);
     private final Counter failoverEventsCounter;
+    private final Counter redisSlowChecksCounter;
+    private final AdminClient adminClient;
 
+    /**
+     * Creates the regional failover manager.
+     * @param jdbcTemplate JDBC template used for DB health checks
+     * @param redisTemplate redis template used for Redis health checks
+     * @param kafkaAdmin kafka admin client used for broker health checks
+     * @param meterRegistry metrics registry
+     */
     public RegionalFailoverManager(
             DataSource dataSource,
             StringRedisTemplate redisTemplate,
             MeterRegistry meterRegistry,
             @Value("${app.multi-region.enabled:false}") boolean enabled,
             @Value("${app.multi-region.auto-failover.enabled:true}") boolean autoFailoverEnabled,
-            @Value("${app.multi-region.auto-failover.unhealthy-threshold:3}") int unhealthyThreshold,
+            @Value("${app.multi-region.auto-failover.unhealthy-threshold:3}") int globalUnhealthyThreshold,
+            @Value("${app.multi-region.auto-failover.healthy-threshold:2}") int healthyThresholdToRecover,
+            @Value("${app.multi-region.health.check-timeout-ms:2000}") long checkTimeoutMs,
+            @Value("${app.multi-region.health.redis-latency-threshold-ms:150}") long redisLatencyThresholdMs,
+            @Value("${app.multi-region.health.db-failure-threshold:2}") int dbFailureThreshold,
+            @Value("${app.multi-region.health.redis-failure-threshold:2}") int redisFailureThreshold,
+            @Value("${app.multi-region.health.kafka-failure-threshold:2}") int kafkaFailureThreshold,
             @Value("${app.multi-region.region-id:region-a}") String regionId,
             @Value("${app.multi-region.failover.mode:active-passive}") String failoverStrategy,
             @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String kafkaBootstrapServers) {
@@ -50,85 +86,177 @@ public class RegionalFailoverManager {
         this.meterRegistry = meterRegistry;
         this.enabled = enabled;
         this.autoFailoverEnabled = autoFailoverEnabled;
-        this.unhealthyThreshold = Math.max(1, unhealthyThreshold);
+        this.globalUnhealthyThreshold = Math.max(1, globalUnhealthyThreshold);
+        this.healthyThresholdToRecover = Math.max(1, healthyThresholdToRecover);
+        this.checkTimeoutMs = Math.max(500, checkTimeoutMs);
+        this.redisLatencyThresholdMs = Math.max(1, redisLatencyThresholdMs);
+        this.dbFailureThreshold = Math.max(1, dbFailureThreshold);
+        this.redisFailureThreshold = Math.max(1, redisFailureThreshold);
+        this.kafkaFailureThreshold = Math.max(1, kafkaFailureThreshold);
         this.regionId = regionId;
         this.failoverStrategy = failoverStrategy == null || failoverStrategy.isBlank()
                 ? "active-passive" : failoverStrategy.toLowerCase();
-        this.nodeState = new AtomicReference<>("active");
+        this.nodeState = new AtomicReference<>(NodeState.ACTIVE);
         this.kafkaBootstrapServers = kafkaBootstrapServers;
         this.failoverEventsCounter = meterRegistry.counter("failover.events.count", "region", regionId);
+        this.redisSlowChecksCounter = meterRegistry.counter("region.health.redis.slow.count", "region", regionId);
+        this.adminClient = createAdminClient();
     }
 
+    /**
+     * Executes allowsWrites.
+     * @return operation result
+     */
     public boolean allowsWrites() {
         if (!enabled) {
             return true;
         }
-        return !"passive".equalsIgnoreCase(nodeState.get());
+        return nodeState.get() != NodeState.PASSIVE;
     }
 
+    /**
+     * Executes currentMode.
+     * @return operation result
+     */
     public String currentMode() {
-        return failoverStrategy + ":" + nodeState.get();
+        return failoverStrategy + ":" + nodeState.get().name().toLowerCase();
     }
 
     @Scheduled(fixedDelayString = "${app.multi-region.auto-failover.poll-ms:5000}")
+    /**
+     * Executes monitorAndFailover.
+     */
     public void monitorAndFailover() {
         if (!enabled || !autoFailoverEnabled) {
             return;
         }
-        boolean healthy = checkDb() && checkRedis() && checkKafka();
+        boolean dbHealthy = checkDb();
+        boolean redisHealthy = checkRedis();
+        boolean kafkaHealthy = checkKafka();
+        boolean healthy = dbHealthy && redisHealthy && kafkaHealthy;
+
+        updateDependencyFailureCounter("db", dbHealthy, dbFailures);
+        updateDependencyFailureCounter("redis", redisHealthy, redisFailures);
+        updateDependencyFailureCounter("kafka", kafkaHealthy, kafkaFailures);
+
+        boolean dependencyThresholdBreached = dbFailures.get() >= dbFailureThreshold
+                || redisFailures.get() >= redisFailureThreshold
+                || kafkaFailures.get() >= kafkaFailureThreshold;
         if (healthy) {
-            if (consecutiveUnhealthy.getAndSet(0) > 0 && "passive".equalsIgnoreCase(nodeState.get())) {
-                switchMode("active", "dependencies-restored");
+            consecutiveUnhealthy.set(0);
+            int healthyStreak = consecutiveHealthy.incrementAndGet();
+            if (nodeState.get() == NodeState.PASSIVE
+                    && healthyStreak >= healthyThresholdToRecover
+                    && "active-passive".equalsIgnoreCase(failoverStrategy)) {
+                switchMode(NodeState.ACTIVE, "dependencies-restored");
             }
             return;
         }
 
+        consecutiveHealthy.set(0);
         int failures = consecutiveUnhealthy.incrementAndGet();
         meterRegistry.counter("region.health.unhealthy.count", "region", regionId).increment();
-        if (failures >= unhealthyThreshold && "active-passive".equalsIgnoreCase(failoverStrategy)) {
-            switchMode("passive", "dependency-health-threshold-reached");
+        if (dependencyThresholdBreached
+                && failures >= globalUnhealthyThreshold
+                && "active-passive".equalsIgnoreCase(failoverStrategy)) {
+            switchMode(NodeState.PASSIVE, "dependency-health-threshold-reached");
         }
     }
 
-    private void switchMode(String nextMode, String reason) {
-        String previous = nodeState.getAndSet(nextMode);
-        if (previous.equalsIgnoreCase(nextMode)) {
+    private void switchMode(NodeState nextMode, String reason) {
+        NodeState previous = nodeState.getAndSet(nextMode);
+        if (previous == nextMode) {
             return;
         }
         failoverEventsCounter.increment();
-        log.warn("Region failover mode switched region={} from={} to={} reason={}", regionId, previous, nextMode, reason);
+        log.warn("Region failover mode switched region={} from={} to={} reason={}",
+                regionId, previous.name().toLowerCase(), nextMode.name().toLowerCase(), reason);
     }
 
     private boolean checkDb() {
         try (Connection connection = dataSource.getConnection()) {
-            return connection.isValid((int) Duration.ofSeconds(2).toSeconds());
+            int seconds = (int) Math.max(1, TimeUnit.MILLISECONDS.toSeconds(checkTimeoutMs));
+            return connection.isValid(seconds);
         } catch (Exception ex) {
-            log.warn("Regional DB health check failed region={} reason={}", regionId, ex.toString());
+            log.debug("Regional DB health check failed region={} reason={}", regionId, ex.toString());
             return false;
         }
     }
 
     private boolean checkRedis() {
         try (RedisConnection connection = redisTemplate.getConnectionFactory().getConnection()) {
+            long startNs = System.nanoTime();
             String pong = connection.ping();
-            return pong != null;
+            long latencyMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+            meterRegistry.timer("region.health.redis.latency", "region", regionId)
+                    .record(latencyMs, TimeUnit.MILLISECONDS);
+            if (latencyMs > redisLatencyThresholdMs) {
+                redisSlowChecksCounter.increment();
+                log.warn("Regional Redis health check slow region={} latencyMs={} thresholdMs={}",
+                        regionId, latencyMs, redisLatencyThresholdMs);
+            }
+            return pong != null && "PONG".equalsIgnoreCase(pong);
         } catch (Exception ex) {
-            log.warn("Regional Redis health check failed region={} reason={}", regionId, ex.toString());
+            log.debug("Regional Redis health check failed region={} reason={}", regionId, ex.toString());
             return false;
         }
     }
 
     private boolean checkKafka() {
-        Properties props = new Properties();
-        props.put("bootstrap.servers", kafkaBootstrapServers);
-        props.put("request.timeout.ms", "2000");
-        props.put("default.api.timeout.ms", "2000");
-        try (AdminClient adminClient = AdminClient.create(props)) {
-            adminClient.describeCluster().clusterId().get();
+        try {
+            DescribeClusterResult cluster = adminClient.describeCluster();
+            String clusterId = cluster.clusterId().get(checkTimeoutMs, TimeUnit.MILLISECONDS);
+            int nodeCount = cluster.nodes().get(checkTimeoutMs, TimeUnit.MILLISECONDS).size();
+            Object controller = cluster.controller().get(checkTimeoutMs, TimeUnit.MILLISECONDS);
+            // Validate cluster metadata and topic-listing call for stronger signal than connectivity only.
+            adminClient.listTopics().names().get(checkTimeoutMs, TimeUnit.MILLISECONDS);
+            if (clusterId == null || clusterId.isBlank() || nodeCount <= 0 || controller == null) {
+                log.warn("Regional Kafka health degraded region={} clusterId={} nodeCount={} controllerPresent={}",
+                        regionId, clusterId, nodeCount, controller != null);
+                return false;
+            }
             return true;
         } catch (Exception ex) {
-            log.warn("Regional Kafka health check failed region={} reason={}", regionId, ex.toString());
+            log.debug("Regional Kafka health check failed region={} reason={}", regionId, ex.toString());
             return false;
+        }
+    }
+
+    private void updateDependencyFailureCounter(String dependency, boolean healthy, AtomicInteger counter) {
+        if (healthy) {
+            counter.set(0);
+            return;
+        }
+        int current = counter.incrementAndGet();
+        meterRegistry.counter("region.health.dependency.failure.count", "region", regionId, "dependency", dependency)
+                .increment();
+        if (current == 1
+                || current == dbFailureThreshold
+                || current == redisFailureThreshold
+                || current == kafkaFailureThreshold) {
+            log.warn("Regional dependency unhealthy region={} dependency={} consecutiveFailures={}",
+                    regionId, dependency, current);
+        }
+    }
+
+    private AdminClient createAdminClient() {
+        Properties props = new Properties();
+        props.put("bootstrap.servers", kafkaBootstrapServers);
+        props.put("request.timeout.ms", String.valueOf(checkTimeoutMs));
+        props.put("default.api.timeout.ms", String.valueOf(checkTimeoutMs));
+        props.put("connections.max.idle.ms", "30000");
+        return AdminClient.create(props);
+    }
+
+    @PreDestroy
+    /**
+     * Executes shutdown.
+     */
+    public void shutdown() {
+        try {
+            adminClient.close(Duration.ofMillis(checkTimeoutMs));
+        } catch (Exception ex) {
+            log.debug("Kafka admin client close warning region={} reason={}", regionId, ex.toString());
         }
     }
 }

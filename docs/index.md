@@ -163,7 +163,8 @@ flowchart TD
 - [Components and Tooling Rationale](./components-and-tooling.md)
 - [Observability, Logging, Monitoring](./observability-and-operations.md)
 - [Use Cases and Failure Cases](./use-cases-and-failure-scenarios.md)
-- [Folder and Class Reference](./folder-and-class-reference.md)
+- [Folder and Class Reference (Overview)](./folder-and-class-reference.md)
+- [Reference Documentation (Nested)](./reference/index.md)
 - [Testing and Quality Strategy](./testing-and-quality.md)
 
 ## Runtime prerequisites

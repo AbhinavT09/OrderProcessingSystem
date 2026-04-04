@@ -67,19 +67,21 @@ No Kafka call occurs inside this transaction.
 
 ### Publisher flow
 
-`OutboxPublisher` periodically scans `PENDING/FAILED` rows and publishes:
+Outbox publishing is now split across `OutboxPublisher` (scheduler), `OutboxFetcher` (partition claim), `OutboxProcessor` (async publish), and `OutboxRetryHandler` (retry/backoff).
 
-- On success -> status `SENT`
-- On failure -> `retryCount++`, status `FAILED`
-- Exponential backoff and max retries prevent infinite loops
+Scheduler cycle behavior:
+
+- `OutboxFetcher` claims partition-owned rows transactionally and enforces deterministic per-batch ordering.
+- `OutboxProcessor` marks in-flight lease (`FAILED` + `nextAttemptAt`) before async send to reduce duplicate claims.
+- Success path marks `SENT` and records lag/rate metrics.
+- `OutboxRetryHandler` increments retries, applies exponential backoff, and parks terminal failures after max retries.
 
 ## 6) Kafka consumer reliability design
 
 `OrderCreatedConsumer` correctness controls:
 
-- Checks `ProcessedEventRepository` **before** processing
-- Persists processed marker **after** successful processing
-- Manual ack mode (`manual_immediate`) and ack only on success/duplicate-safe path
+- `processEventInTransaction(...)` wraps dedupe check, state transition, and processed-marker insert in one transaction boundary.
+- Manual ack mode (`manual_immediate`) and ack only on success or duplicate-safe marker race path.
 - Retry-topic based delayed retries; bounded attempts
 - DLQ handler with rich context logging (topic/partition/offset/event ids)
 - Rebalance lifecycle visibility via `KafkaConsumerRebalanceObserver`

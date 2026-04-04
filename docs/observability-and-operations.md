@@ -82,22 +82,20 @@ Use traces + request_id for end-to-end debugging.
 
 ## 4) Reliability and retry behavior
 
-### OutboxPublisher
+### Outbox pipeline (`OutboxPublisher` + `OutboxFetcher` + `OutboxProcessor` + `OutboxRetryHandler`)
 
-- Polls pending/failed rows
-- Exponential backoff based on retry count
-- Bounded retries (max retries)
-- `SENT` / `FAILED` state transitions tracked in DB
-- Parallel, partition-aware workers with `SKIP LOCKED` row claiming
-- Cleanup moves old `SENT` records to archive table
+- Scheduler dispatches owned partitions with in-flight semaphore backpressure.
+- Fetcher claims rows in transaction, records `outbox.batch.size`, and preserves deterministic aggregate ordering.
+- Processor performs async publish, tracks publish latency/rate/lag, and marks `SENT` on completion.
+- Retry handler updates retry count, computes exponential delay with cap, and parks terminal failures when max retries are exhausted.
+- Cleanup archives/deletes old `SENT` rows on retention schedule.
 
 ### Kafka consumer
 
-- Manual ack mode (`manual_immediate`)
-- Ack only after safe completion
-- Retry topics with exponential backoff and max attempts
-- DLQ handler for terminal failures
-- Versioned schema parsing with fallback compatibility logic
+- Manual ack mode (`manual_immediate`) with ack after transactional processing success.
+- Dedupe check + domain update + processed marker insertion executed in transaction template boundary.
+- Retry topics with exponential backoff and max attempts; DLT handler logs payload context and headers.
+- Versioned schema parsing with fallback compatibility logic.
 
 ## 5) DLQ operations guidance
 

@@ -9,6 +9,10 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
 
 @Component
+/**
+ * VersionedJsonOrderCreatedEventSchemaRegistry implements a concrete responsibility in the order processing service.
+ * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ */
 public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreatedEventSchemaRegistry {
 
     public static final int SCHEMA_V1 = 1;
@@ -18,6 +22,11 @@ public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreate
     private final Counter validationErrors;
     private final MeterRegistry meterRegistry;
 
+    /**
+     * Creates a schema registry backed by Jackson and Micrometer.
+     * @param objectMapper serializer/deserializer for event payloads
+     * @param meterRegistry metrics registry for schema counters
+     */
     public VersionedJsonOrderCreatedEventSchemaRegistry(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
         this.objectMapper = objectMapper;
         this.meterRegistry = meterRegistry;
@@ -25,11 +34,20 @@ public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreate
     }
 
     @Override
+    /**
+     * Executes latestSchemaVersion.
+     * @return operation result
+     */
     public int latestSchemaVersion() {
         return SCHEMA_V2;
     }
 
     @Override
+    /**
+     * Executes serialize.
+     * @param event input argument used by this operation
+     * @return operation result
+     */
     public String serialize(OrderCreatedEvent event) {
         OrderCreatedEvent normalized = normalize(event);
         validate(normalized);
@@ -43,6 +61,11 @@ public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreate
     }
 
     @Override
+    /**
+     * Executes deserialize.
+     * @param payload input argument used by this operation
+     * @return operation result
+     */
     public OrderCreatedEvent deserialize(String payload) {
         try {
             JsonNode root = objectMapper.readTree(payload);
@@ -68,6 +91,10 @@ public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreate
     }
 
     @Override
+    /**
+     * Executes validate.
+     * @param event input argument used by this operation
+     */
     public void validate(OrderCreatedEvent event) {
         OrderCreatedEvent normalized = normalize(event);
         requireNotBlank(normalized.eventId(), "eventId");
