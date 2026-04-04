@@ -1,0 +1,39 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:ordersdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  kafka:
+    bootstrap-servers: localhost:9092
+
+app:
+  kafka:
+    order-events-topic: order.events
+    publisher:
+      max-retries: 3
+      retry-backoff-ms: 300
+      circuit-breaker:
+        failure-threshold: 5
+        open-seconds: 20
+  outbox:
+    poll-ms: 5000
+    max-attempts: 8
+    backoff-base-seconds: 5
+  order-pending-promote-ms: 300000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+logging:
+  pattern:
+    level: "%5p [requestId=%X{requestId:-na}]"
+  level:
+    com.example.orderprocessing: INFO

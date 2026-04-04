@@ -1,2 +1,3 @@
-com/example/orderprocessing/OrderServiceTest.class
-com/example/orderprocessing/OrderControllerIntegrationTest.class
+com/example/orderprocessing/infrastructure/messaging/OutboxDispatcherTest$FailingPublisher.class
+com/example/orderprocessing/infrastructure/messaging/OutboxDispatcherTest.class
+com/example/orderprocessing/infrastructure/messaging/OutboxDispatcherTest$FakeOutboxRepository.class
