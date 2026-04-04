@@ -17,8 +17,11 @@ import org.springframework.stereotype.Component;
 
 @Component
 /**
- * KafkaEventPublisher implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure adapter that publishes domain integration events to Kafka.
+ *
+ * <p>Implements asynchronous send semantics with per-order key serialization to preserve
+ * event order for the same aggregate. Uses a lightweight circuit breaker so repeated broker
+ * failures do not continuously amplify latency on the write path.</p>
  */
 public class KafkaEventPublisher implements EventPublisher {
 
@@ -56,9 +59,17 @@ public class KafkaEventPublisher implements EventPublisher {
 
     @Override
     /**
-     * Executes publishOrderCreated.
-     * @param event input argument used by this operation
-     * @return operation result
+     * Publishes an {@code ORDER_CREATED} integration event asynchronously.
+     *
+     * <p>Key behaviors:</p>
+     * <ul>
+     *   <li>Validates and serializes payload using schema registry before send.</li>
+     *   <li>Serializes sends per order key to avoid out-of-order publication for same aggregate.</li>
+     *   <li>Fails fast when circuit is open after repeated broker failures.</li>
+     * </ul>
+     *
+     * @param event event payload representing committed order creation
+     * @return future that completes on broker ack or exceptionally on publish failure
      */
     public CompletableFuture<Void> publishOrderCreated(OrderCreatedEvent event) {
         if (isCircuitOpen()) {

@@ -23,8 +23,10 @@ import java.util.UUID;
         @UniqueConstraint(name = "uk_orders_idempotency_key", columnNames = "idempotencyKey")
 })
 /**
- * OrderEntity implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * JPA persistence model for order aggregate snapshots.
+ *
+ * <p>Represents durable write/read state in the infrastructure layer, including optimistic-lock
+ * version and optional idempotency key mapping used during order creation retries.</p>
  */
 public class OrderEntity {
 

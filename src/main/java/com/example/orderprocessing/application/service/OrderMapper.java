@@ -11,24 +11,27 @@ import org.springframework.stereotype.Component;
 
 @Component
 /**
- * OrderMapper implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Application-layer mapping component across interface, domain, and persistence models.
+ *
+ * <p>Concentrates translation rules so services remain focused on orchestration and domain intent.</p>
  */
 public class OrderMapper {
 
     /**
-     * Executes toDomainItems.
-     * @param items input argument used by this operation
-     * @return operation result
+     * Converts request items into domain value objects.
+     *
+     * @param items incoming HTTP DTO items
+     * @return domain items used by aggregate construction
      */
     public List<OrderItem> toDomainItems(List<OrderItemRequest> items) {
         return items.stream().map(item -> new OrderItem(item.productName(), item.quantity(), item.price())).toList();
     }
 
     /**
-     * Executes toDomain.
-     * @param entity input argument used by this operation
-     * @return operation result
+     * Rehydrates a domain aggregate from persistence representation.
+     *
+     * @param entity JPA entity loaded from storage
+     * @return domain aggregate preserving status/version semantics
      */
     public Order toDomain(OrderEntity entity) {
         List<OrderItem> items = entity.getItems().stream()
@@ -44,9 +47,10 @@ public class OrderMapper {
     }
 
     /**
-     * Executes toEntity.
-     * @param domain input argument used by this operation
-     * @return operation result
+     * Projects a domain aggregate into persistence shape.
+     *
+     * @param domain domain aggregate
+     * @return entity ready for repository persistence
      */
     public OrderEntity toEntity(Order domain) {
         OrderEntity entity = new OrderEntity();
@@ -60,9 +64,10 @@ public class OrderMapper {
     }
 
     /**
-     * Executes toResponse.
-     * @param domain input argument used by this operation
-     * @return operation result
+     * Converts domain aggregate into HTTP response DTO.
+     *
+     * @param domain domain aggregate
+     * @return API-facing response model
      */
     public OrderResponse toResponse(Order domain) {
         List<OrderItemRequest> items = domain.getItems().stream()

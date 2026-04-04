@@ -5,8 +5,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /**
- * ProcessingState implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Domain state for orders currently being fulfilled.
  */
 public class ProcessingState extends AbstractOrderState {
 
@@ -17,8 +16,7 @@ public class ProcessingState extends AbstractOrderState {
 
     @Override
     /**
-     * Executes status.
-     * @return operation result
+     * Returns {@code PROCESSING}.
      */
     public OrderStatus status() {
         return OrderStatus.PROCESSING;

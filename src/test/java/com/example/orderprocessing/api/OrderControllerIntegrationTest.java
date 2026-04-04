@@ -23,6 +23,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {
         "app.security.jwt-secret=test-secret-for-integration-tests-123456",
         "app.security.rate-limit.requests=1000",
+        "spring.data.redis.sentinel.master=test-master",
+        "spring.data.redis.sentinel.nodes=localhost:26379",
         "spring.kafka.listener.auto-startup=false",
         "spring.kafka.admin.auto-create=false",
         "spring.task.scheduling.enabled=false"
@@ -121,5 +123,38 @@ class OrderControllerIntegrationTest {
                         .content("{\"items\":[]}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void shouldReturnSameOrderForSameIdempotencyKey() throws Exception {
+        String body = """
+                {
+                  "items": [
+                    { "productName": "Desk Lamp", "quantity": 1, "price": 30.0 }
+                  ]
+                }
+                """;
+
+        MvcResult first = mockMvc.perform(post("/orders")
+                        .with(SecurityMockMvcRequestPostProcessors.jwt()
+                                .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-integration-1")
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        MvcResult second = mockMvc.perform(post("/orders")
+                        .with(SecurityMockMvcRequestPostProcessors.jwt()
+                                .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-integration-1")
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String firstId = objectMapper.readTree(first.getResponse().getContentAsString()).get("id").asText();
+        String secondId = objectMapper.readTree(second.getResponse().getContentAsString()).get("id").asText();
+        org.junit.jupiter.api.Assertions.assertEquals(firstId, secondId);
     }
 }

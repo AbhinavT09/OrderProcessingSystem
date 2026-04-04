@@ -10,8 +10,10 @@ import java.util.UUID;
 @Entity
 @Table(name = "outbox_events_archive")
 /**
- * OutboxArchiveEntity implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Archived copy of sent outbox events for audit and diagnostics.
+ *
+ * <p>Stores immutable historical delivery data after events are removed from the active outbox
+ * table to keep hot-path queries efficient.</p>
  */
 public class OutboxArchiveEntity {
 
@@ -46,10 +48,11 @@ public class OutboxArchiveEntity {
     private Instant archivedAt;
 
     /**
-     * Executes from.
-     * @param source input argument used by this operation
-     * @param archivedAt input argument used by this operation
-     * @return operation result
+     * Creates an archive record from an active outbox row.
+     *
+     * @param source active outbox row
+     * @param archivedAt archive timestamp
+     * @return populated archive entity
      */
     public static OutboxArchiveEntity from(OutboxEntity source, Instant archivedAt) {
         OutboxArchiveEntity archive = new OutboxArchiveEntity();

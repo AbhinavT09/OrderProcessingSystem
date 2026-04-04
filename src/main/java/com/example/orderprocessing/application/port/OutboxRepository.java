@@ -7,59 +7,68 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * OutboxRepository interface defines a stable boundary used by collaborating components.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Application port for transactional outbox persistence and lifecycle transitions.
+ *
+ * <p>Supports leasing, retry orchestration, and archival operations needed by the outbox pattern.</p>
  */
 public interface OutboxRepository {
     /**
-     * Performs save.
-     * @param outboxEvent input argument used by this operation
-     * @return operation result
+     * Persists or updates an outbox record.
+     *
+     * @param outboxEvent outbox event entity
+     * @return persisted entity
      */
     OutboxEntity save(OutboxEntity outboxEvent);
     /**
-     * Performs findTop100ByStatusInOrderByCreatedAtAsc.
-     * @param statuses input argument used by this operation
-     * @return operation result
+     * Reads a small ordered batch by status for compatibility flows.
+     *
+     * @param statuses statuses eligible for fetch
+     * @return oldest matching rows
      */
     List<OutboxEntity> findTop100ByStatusInOrderByCreatedAtAsc(List<OutboxStatus> statuses);
     /**
-     * Performs countByStatus.
-     * @param status input argument used by this operation
-     * @return operation result
+     * Counts events in a specific lifecycle status.
+     *
+     * @param status outbox status
+     * @return number of rows in given status
      */
     long countByStatus(OutboxStatus status);
     /**
-     * Performs existsByIdAndStatus.
-     * @param id input argument used by this operation
-     * @param status input argument used by this operation
-     * @return operation result
+     * Checks whether a row still matches expected id/status combination.
+     *
+     * @param id outbox row id
+     * @param status expected status
+     * @return true when row exists with that status
      */
     boolean existsByIdAndStatus(UUID id, OutboxStatus status);
     /**
-     * Performs claimBatchForPartition.
-     * @param partitionKey input argument used by this operation
-     * @param now input argument used by this operation
-     * @param maxRetries input argument used by this operation
-     * @param batchSize input argument used by this operation
-     * @return operation result
+     * Claims due events for one partition with retry cap and size bound.
+     *
+     * @param partitionKey partition owned by current publisher worker
+     * @param now claim timestamp for due filtering
+     * @param maxRetries retry ceiling for eligible rows
+     * @param batchSize upper bound of claimed rows
+     * @return leased rows for processing
      */
     List<OutboxEntity> claimBatchForPartition(int partitionKey, Instant now, int maxRetries, int batchSize);
     /**
-     * Performs findSentOlderThan.
-     * @param cutoff input argument used by this operation
-     * @return operation result
+     * Finds sent rows older than archival cutoff.
+     *
+     * @param cutoff archival threshold
+     * @return rows eligible for archive/purge
      */
     List<OutboxEntity> findSentOlderThan(Instant cutoff);
     /**
-     * Performs saveArchiveBatch.
-     * @param sentEventsToArchive input argument used by this operation
-     * @param archivedAt input argument used by this operation
+     * Archives sent rows before deletion from active outbox table.
+     *
+     * @param sentEventsToArchive rows to archive
+     * @param archivedAt archive timestamp
      */
     void saveArchiveBatch(List<OutboxEntity> sentEventsToArchive, Instant archivedAt);
     /**
-     * Performs deleteBatch.
-     * @param sentEventsToDelete input argument used by this operation
+     * Deletes archived rows from active outbox table.
+     *
+     * @param sentEventsToDelete rows to delete
      */
     void deleteBatch(List<OutboxEntity> sentEventsToDelete);
 }

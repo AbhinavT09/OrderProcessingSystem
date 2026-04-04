@@ -25,12 +25,21 @@ import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 /**
- * OrderService implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Application-layer command service (CQRS write side) for order lifecycle changes.
+ *
+ * <p>Responsibilities:</p>
+ * <ul>
+ *   <li>Coordinates idempotent order creation using global lifecycle states.</li>
+ *   <li>Persists aggregate state via repository ports and emits outbox events.</li>
+ *   <li>Invalidates read caches after successful writes.</li>
+ *   <li>Enforces regional write gating through failover policy.</li>
+ * </ul>
  */
 public class OrderService {
 
@@ -80,30 +89,60 @@ public class OrderService {
 
     @Transactional
     /**
-     * Executes createOrder.
-     * @param request input argument used by this operation
-     * @param idempotencyKey input argument used by this operation
-     * @return operation result
+     * Creates an order while enforcing request-level idempotency semantics.
+     *
+     * <p>Idempotency lifecycle handling:</p>
+     * <ul>
+     *   <li><b>COMPLETED</b>: returns the previously created order response.</li>
+     *   <li><b>IN_PROGRESS</b>: rejects concurrent duplicate processing with conflict.</li>
+     *   <li><b>ABSENT</b>: marks key IN_PROGRESS, then executes write flow.</li>
+     * </ul>
+     *
+     * <p>Side effects include:</p>
+     * <ul>
+     *   <li>DB write of {@code OrderEntity}.</li>
+     *   <li>Transactional outbox enqueue for {@code ORDER_CREATED}.</li>
+     *   <li>Cache invalidation of order-list views.</li>
+     *   <li>After-commit transition of idempotency key to COMPLETED with order id.</li>
+     * </ul>
+     *
+     * @param request validated create-order payload from interface layer
+     * @param idempotencyKey optional idempotency key from request header
+     * @return created or previously completed order response
      */
     public OrderResponse createOrder(CreateOrderRequest request, String idempotencyKey) {
         assertWriteAllowed();
         requestCounter.increment();
         return operationTimer.record(() -> {
             String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
-            String idempotencyOwner = UUID.randomUUID().toString();
 
             if (normalizedIdempotencyKey != null) {
-                UUID globalOrderId = globalIdempotencyService.resolveCompletedOrderId(normalizedIdempotencyKey).orElse(null);
-                if (globalOrderId != null) {
-                    OrderEntity existingGlobal = orderRepository.findById(globalOrderId).orElse(null);
+                GlobalIdempotencyService.IdempotencyState state =
+                        globalIdempotencyService.resolveState(normalizedIdempotencyKey);
+
+                if (state.hasCompletedOrder()) {
+                    OrderEntity existingGlobal = orderRepository.findById(state.orderId()).orElse(null);
                     if (existingGlobal != null) {
                         idempotentHitCounter.increment();
-                        log.info("Global idempotent order create hit key={} orderId={}",
+                        log.info("Global idempotency COMPLETED reuse key={} orderId={}",
                                 normalizedIdempotencyKey, existingGlobal.getId());
                         return mapper.toResponse(mapper.toDomain(existingGlobal));
                     }
                 }
-                if (!globalIdempotencyService.tryAcquire(normalizedIdempotencyKey, idempotencyOwner)) {
+
+                if (state.status() == GlobalIdempotencyService.IdempotencyStatus.IN_PROGRESS) {
+                    log.info("Global idempotency IN_PROGRESS detected key={} timestamp={}",
+                            normalizedIdempotencyKey, state.timestamp());
+                    throw new ConflictException("Duplicate request in progress for idempotency key");
+                }
+
+                if (!globalIdempotencyService.markInProgress(normalizedIdempotencyKey)) {
+                    GlobalIdempotencyService.IdempotencyState latestState =
+                            globalIdempotencyService.resolveState(normalizedIdempotencyKey);
+                    if (latestState.status() == GlobalIdempotencyService.IdempotencyStatus.IN_PROGRESS) {
+                        log.info("Global idempotency IN_PROGRESS detected key={} timestamp={}",
+                                normalizedIdempotencyKey, latestState.timestamp());
+                    }
                     throw new ConflictException("Duplicate request in progress for idempotency key");
                 }
             }
@@ -113,6 +152,7 @@ public class OrderService {
                 if (existing != null) {
                     idempotentHitCounter.increment();
                     log.info("Idempotent order create hit key={} orderId={}", normalizedIdempotencyKey, existing.getId());
+                    globalIdempotencyService.markCompleted(normalizedIdempotencyKey, existing.getId());
                     return mapper.toResponse(mapper.toDomain(existing));
                 }
             }
@@ -131,7 +171,7 @@ public class OrderService {
                         Instant.now().toString());
                 outboxService.enqueueOrderCreated(saved.getId().toString(), createdEvent);
                 invalidateStatusCaches();
-                globalIdempotencyService.markCompleted(normalizedIdempotencyKey, saved.getId());
+                markGlobalIdempotencyCompletedAfterCommit(normalizedIdempotencyKey, saved.getId());
 
                 createCounter.increment();
                 log.info("Order created orderId={} status={} idempotencyKey={}",
@@ -145,6 +185,7 @@ public class OrderService {
                 OrderEntity existing = orderRepository.findByIdempotencyKey(normalizedIdempotencyKey)
                         .orElseThrow(() -> new ConflictException("Idempotency conflict while creating order"));
                 idempotentHitCounter.increment();
+                globalIdempotencyService.markCompleted(normalizedIdempotencyKey, existing.getId());
                 log.warn("Order create deduped after race key={} orderId={}", normalizedIdempotencyKey, existing.getId());
                 return mapper.toResponse(mapper.toDomain(existing));
             } finally {
@@ -155,11 +196,15 @@ public class OrderService {
 
     @Transactional
     /**
-     * Executes updateStatus.
-     * @param id input argument used by this operation
-     * @param status input argument used by this operation
-     * @param expectedVersion input argument used by this operation
-     * @return operation result
+     * Updates order status with optimistic-concurrency protection.
+     *
+     * <p>Uses caller-provided expected version and retries once on optimistic lock races.
+     * A conflict is returned when concurrent updates cannot be reconciled safely.</p>
+     *
+     * @param id order identifier
+     * @param status target status transition requested by caller
+     * @param expectedVersion version expected by caller for compare-and-set semantics
+     * @return updated order response
      */
     public OrderResponse updateStatus(UUID id, OrderStatus status, Long expectedVersion) {
         assertWriteAllowed();
@@ -197,9 +242,13 @@ public class OrderService {
 
     @Transactional
     /**
-     * Executes cancel.
-     * @param id input argument used by this operation
-     * @return operation result
+     * Cancels an order when domain invariants allow cancellation.
+     *
+     * <p>Applies the same optimistic-concurrency retry policy as status updates and
+     * invalidates cached read models after persistence succeeds.</p>
+     *
+     * @param id order identifier
+     * @return cancelled order response
      */
     public OrderResponse cancel(UUID id) {
         assertWriteAllowed();
@@ -268,5 +317,22 @@ public class OrderService {
         if (!failoverManager.allowsWrites()) {
             throw new InfrastructureException("Region in passive mode; writes are temporarily disabled", null);
         }
+    }
+
+    private void markGlobalIdempotencyCompletedAfterCommit(String idempotencyKey, UUID orderId) {
+        if (idempotencyKey == null || orderId == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    globalIdempotencyService.markCompleted(idempotencyKey, orderId);
+                }
+            });
+            return;
+        }
+        // Defensive fallback in case method is reused outside a transaction boundary.
+        globalIdempotencyService.markCompleted(idempotencyKey, orderId);
     }
 }

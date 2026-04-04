@@ -8,8 +8,10 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Order implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Domain aggregate root for order lifecycle behavior.
+ *
+ * <p>Encapsulates order identity, item data, and state-transition rules via the state pattern.
+ * This class belongs to the domain layer and is intentionally persistence-agnostic.</p>
  */
 public class Order {
 
@@ -35,10 +37,11 @@ public class Order {
     }
 
     /**
-     * Executes create.
-     * @param items input argument used by this operation
-     * @param idempotencyKey input argument used by this operation
-     * @return operation result
+     * Creates a new order in the initial {@code PENDING} lifecycle state.
+     *
+     * @param items order line items
+     * @param idempotencyKey optional request key captured for duplicate suppression
+     * @return newly constructed order aggregate
      */
     public static Order create(List<OrderItem> items, String idempotencyKey) {
         return new Order(UUID.randomUUID(), Instant.now(), idempotencyKey, items, new PendingState(), null);
@@ -64,23 +67,25 @@ public class Order {
     }
 
     /**
-     * Executes updateStatus.
-     * @param target input argument used by this operation
+     * Applies a domain status transition.
+     *
+     * @param target desired target status
      */
     public void updateStatus(OrderStatus target) {
         currentState = currentState.transitionTo(target);
     }
 
     /**
-     * Executes cancel.
+     * Cancels the order when current state allows cancellation.
      */
     public void cancel() {
         currentState = currentState.cancel();
     }
 
     /**
-     * Executes promotePendingToProcessing.
-     * @return operation result
+     * Promotes a pending order to processing when applicable.
+     *
+     * @return {@code true} when promotion changed state, otherwise {@code false}
      */
     public boolean promotePendingToProcessing() {
         OrderStatus before = currentState.status();
@@ -88,50 +93,32 @@ public class Order {
         return before != currentState.status();
     }
 
-    /**
-     * Returns id value.
-     * @return operation result
-     */
+    /** Returns aggregate identifier. */
     public UUID getId() {
         return id;
     }
 
-    /**
-     * Returns createdAt value.
-     * @return operation result
-     */
+    /** Returns creation timestamp captured at aggregate creation. */
     public Instant getCreatedAt() {
         return createdAt;
     }
 
-    /**
-     * Returns idempotencyKey value.
-     * @return operation result
-     */
+    /** Returns optional idempotency key associated with create request. */
     public String getIdempotencyKey() {
         return idempotencyKey;
     }
 
-    /**
-     * Returns items value.
-     * @return operation result
-     */
+    /** Returns immutable order item collection. */
     public List<OrderItem> getItems() {
         return items;
     }
 
-    /**
-     * Returns status value.
-     * @return operation result
-     */
+    /** Returns current lifecycle status exposed by active state object. */
     public OrderStatus getStatus() {
         return currentState.status();
     }
 
-    /**
-     * Returns version value.
-     * @return operation result
-     */
+    /** Returns optimistic-lock version from persisted aggregate snapshot. */
     public Long getVersion() {
         return version;
     }

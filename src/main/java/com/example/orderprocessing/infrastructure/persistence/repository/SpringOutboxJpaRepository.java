@@ -10,27 +10,31 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 /**
- * SpringOutboxJpaRepository interface defines a stable boundary used by collaborating components.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Spring Data repository for active outbox rows.
+ *
+ * <p>Supports transactional outbox dispatch with status queries, leasing, and cleanup scans.</p>
  */
 public interface SpringOutboxJpaRepository extends JpaRepository<OutboxEntity, UUID> {
     /**
-     * Performs findTop100ByStatusInOrderByCreatedAtAsc.
-     * @param statuses input argument used by this operation
-     * @return operation result
+     * Reads oldest events in provided statuses.
+     *
+     * @param statuses statuses eligible for retrieval
+     * @return ordered batch of outbox rows
      */
     List<OutboxEntity> findTop100ByStatusInOrderByCreatedAtAsc(List<OutboxStatus> statuses);
     /**
-     * Performs countByStatus.
-     * @param status input argument used by this operation
-     * @return operation result
+     * Counts rows by status.
+     *
+     * @param status lifecycle status
+     * @return row count
      */
     long countByStatus(OutboxStatus status);
     /**
-     * Performs existsByIdAndStatus.
-     * @param id input argument used by this operation
-     * @param status input argument used by this operation
-     * @return operation result
+     * Checks if a row still exists in expected state.
+     *
+     * @param id row id
+     * @param status expected status
+     * @return true when row is present in that state
      */
     boolean existsByIdAndStatus(UUID id, OutboxStatus status);
 
@@ -51,10 +55,11 @@ public interface SpringOutboxJpaRepository extends JpaRepository<OutboxEntity, U
             @Param("batchSize") int batchSize);
 
     /**
-     * Performs findTop500ByStatusAndUpdatedAtBeforeOrderByUpdatedAtAsc.
-     * @param status input argument used by this operation
-     * @param updatedAt input argument used by this operation
-     * @return operation result
+     * Retrieves sent rows older than a cutoff for archival.
+     *
+     * @param status status filter (typically SENT)
+     * @param updatedAt upper bound for update timestamp
+     * @return archival candidate rows ordered by updated time
      */
     List<OutboxEntity> findTop500ByStatusAndUpdatedAtBeforeOrderByUpdatedAtAsc(OutboxStatus status, Instant updatedAt);
 }

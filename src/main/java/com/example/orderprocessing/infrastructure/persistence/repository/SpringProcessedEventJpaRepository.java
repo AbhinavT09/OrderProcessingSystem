@@ -4,14 +4,16 @@ import com.example.orderprocessing.infrastructure.persistence.entity.ProcessedEv
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
- * SpringProcessedEventJpaRepository interface defines a stable boundary used by collaborating components.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Spring Data repository for processed-event dedup markers.
+ *
+ * <p>Used by consumers to enforce idempotent event handling across retries and rebalances.</p>
  */
 public interface SpringProcessedEventJpaRepository extends JpaRepository<ProcessedEventEntity, Long> {
     /**
-     * Performs existsByEventId.
-     * @param eventId input argument used by this operation
-     * @return operation result
+     * Checks if an event id has already been recorded as processed.
+     *
+     * @param eventId integration event identifier
+     * @return true when marker exists
      */
     boolean existsByEventId(String eventId);
 }

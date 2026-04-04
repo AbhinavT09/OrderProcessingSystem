@@ -13,8 +13,10 @@ import org.springframework.stereotype.Component;
 
 @Component
 /**
- * JpaOutboxRepository implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure persistence adapter for the outbox port.
+ *
+ * <p>Bridges application-level outbox operations to Spring Data JPA repositories, including
+ * active-row leasing and archive-table writes used by the transactional outbox pattern.</p>
  */
 public class JpaOutboxRepository implements OutboxRepository {
 
@@ -34,9 +36,10 @@ public class JpaOutboxRepository implements OutboxRepository {
 
     @Override
     /**
-     * Executes save.
-     * @param outboxEvent input argument used by this operation
-     * @return operation result
+     * Persists or updates an active outbox row.
+     *
+     * @param outboxEvent outbox event state to persist
+     * @return persisted entity
      */
     public OutboxEntity save(OutboxEntity outboxEvent) {
         return repository.save(outboxEvent);
@@ -44,9 +47,10 @@ public class JpaOutboxRepository implements OutboxRepository {
 
     @Override
     /**
-     * Executes findTop100ByStatusInOrderByCreatedAtAsc.
-     * @param statuses input argument used by this operation
-     * @return operation result
+     * Reads a small ordered batch by status for compatibility reads.
+     *
+     * @param statuses statuses eligible for fetch
+     * @return oldest matching events
      */
     public List<OutboxEntity> findTop100ByStatusInOrderByCreatedAtAsc(List<OutboxStatus> statuses) {
         return repository.findTop100ByStatusInOrderByCreatedAtAsc(statuses);
@@ -54,9 +58,10 @@ public class JpaOutboxRepository implements OutboxRepository {
 
     @Override
     /**
-     * Executes countByStatus.
-     * @param status input argument used by this operation
-     * @return operation result
+     * Counts active outbox rows by status.
+     *
+     * @param status status to count
+     * @return number of rows in that status
      */
     public long countByStatus(OutboxStatus status) {
         return repository.countByStatus(status);
@@ -64,10 +69,11 @@ public class JpaOutboxRepository implements OutboxRepository {
 
     @Override
     /**
-     * Executes existsByIdAndStatus.
-     * @param id input argument used by this operation
-     * @param status input argument used by this operation
-     * @return operation result
+     * Verifies that a row still matches expected id and status.
+     *
+     * @param id row id
+     * @param status expected status
+     * @return true when the row exists in the given state
      */
     public boolean existsByIdAndStatus(UUID id, OutboxStatus status) {
         return repository.existsByIdAndStatus(id, status);
@@ -75,12 +81,13 @@ public class JpaOutboxRepository implements OutboxRepository {
 
     @Override
     /**
-     * Executes claimBatchForPartition.
-     * @param partitionKey input argument used by this operation
-     * @param now input argument used by this operation
-     * @param maxRetries input argument used by this operation
-     * @param batchSize input argument used by this operation
-     * @return operation result
+     * Claims due events for a partition using skip-locked semantics.
+     *
+     * @param partitionKey partition assigned to current publisher worker
+     * @param now claim timestamp for due filtering
+     * @param maxRetries retry ceiling
+     * @param batchSize upper bound of claimed rows
+     * @return leased outbox events
      */
     public List<OutboxEntity> claimBatchForPartition(int partitionKey, Instant now, int maxRetries, int batchSize) {
         return repository.claimBatchForPartition(partitionKey, now, maxRetries, batchSize);
@@ -88,9 +95,10 @@ public class JpaOutboxRepository implements OutboxRepository {
 
     @Override
     /**
-     * Executes findSentOlderThan.
-     * @param cutoff input argument used by this operation
-     * @return operation result
+     * Finds sent events that are older than the archive cutoff.
+     *
+     * @param cutoff archival threshold
+     * @return events eligible for archive/purge
      */
     public List<OutboxEntity> findSentOlderThan(Instant cutoff) {
         return repository.findTop500ByStatusAndUpdatedAtBeforeOrderByUpdatedAtAsc(OutboxStatus.SENT, cutoff);
@@ -98,9 +106,10 @@ public class JpaOutboxRepository implements OutboxRepository {
 
     @Override
     /**
-     * Executes saveArchiveBatch.
-     * @param sentEventsToArchive input argument used by this operation
-     * @param archivedAt input argument used by this operation
+     * Copies sent events into archive storage.
+     *
+     * @param sentEventsToArchive sent rows to archive
+     * @param archivedAt archive timestamp
      */
     public void saveArchiveBatch(List<OutboxEntity> sentEventsToArchive, Instant archivedAt) {
         List<OutboxArchiveEntity> archives = sentEventsToArchive.stream()
@@ -111,8 +120,9 @@ public class JpaOutboxRepository implements OutboxRepository {
 
     @Override
     /**
-     * Executes deleteBatch.
-     * @param sentEventsToDelete input argument used by this operation
+     * Removes events from active outbox table after archive succeeds.
+     *
+     * @param sentEventsToDelete rows to delete
      */
     public void deleteBatch(List<OutboxEntity> sentEventsToDelete) {
         repository.deleteAllInBatch(sentEventsToDelete);

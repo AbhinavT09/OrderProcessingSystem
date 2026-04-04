@@ -19,8 +19,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 /**
- * OrderQueryService implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Application-layer query service (CQRS read side) for order retrieval.
+ *
+ * <p>Combines repository reads with cache-aside strategy and request coalescing to reduce
+ * repeated DB load on hot keys while preserving response semantics.</p>
  */
 public class OrderQueryService {
 
@@ -58,9 +60,13 @@ public class OrderQueryService {
 
     @Transactional(readOnly = true)
     /**
-     * Returns byId value.
-     * @param id input argument used by this operation
-     * @return operation result
+     * Retrieves a single order projection, preferring cache when available.
+     *
+     * <p>On cache miss, loads from repository and caches result with by-id TTL.
+     * Concurrent misses for the same key are coalesced to one backing read.</p>
+     *
+     * @param id order identifier
+     * @return order response
      */
     public OrderResponse getById(UUID id) {
         requestCounter.increment();
@@ -82,9 +88,13 @@ public class OrderQueryService {
 
     @Transactional(readOnly = true)
     /**
-     * Executes list.
-     * @param status input argument used by this operation
-     * @return operation result
+     * Retrieves list of orders optionally filtered by status.
+     *
+     * <p>Uses status-scoped cache entries and coalesces concurrent misses to avoid thundering herd
+     * behavior on expensive list queries.</p>
+     *
+     * @param status optional status filter, or {@code null} for all orders
+     * @return order responses for the selected scope
      */
     public List<OrderResponse> list(OrderStatus status) {
         requestCounter.increment();

@@ -5,8 +5,9 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 
 /**
- * UpdateOrderStatusRequest record captures immutable data transferred between layers.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * HTTP command payload for order status updates.
+ *
+ * <p>Includes target status and expected version to support optimistic-concurrency semantics.</p>
  */
 public record UpdateOrderStatusRequest(
         @NotNull OrderStatus status,

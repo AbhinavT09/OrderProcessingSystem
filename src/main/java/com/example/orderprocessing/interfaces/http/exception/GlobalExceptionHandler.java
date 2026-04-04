@@ -18,16 +18,19 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 /**
- * GlobalExceptionHandler implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Interface-layer exception translator for HTTP responses.
+ *
+ * <p>Maps application/infrastructure failures to stable API error envelopes and status codes,
+ * preserving request correlation id for traceability.</p>
  */
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(NotFoundException.class)
     /**
-     * Executes handleNotFound.
-     * @param ex input argument used by this operation
-     * @return operation result
+     * Maps missing-resource failures to {@code 404 NOT_FOUND}.
+     *
+     * @param ex application exception with domain-specific details
+     * @return standardized API error response
      */
     public ResponseEntity<ApiError> handleNotFound(NotFoundException ex) {
         return build(HttpStatus.NOT_FOUND, "NOT_FOUND", ex.getMessage());
@@ -35,9 +38,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ConflictException.class)
     /**
-     * Executes handleConflict.
-     * @param ex input argument used by this operation
-     * @return operation result
+     * Maps business conflicts to {@code 409 CONFLICT}.
+     *
+     * @param ex conflict details
+     * @return standardized API error response
      */
     public ResponseEntity<ApiError> handleConflict(ConflictException ex) {
         return build(HttpStatus.CONFLICT, "CONFLICT", ex.getMessage());
@@ -45,9 +49,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InfrastructureException.class)
     /**
-     * Executes handleInfrastructure.
-     * @param ex input argument used by this operation
-     * @return operation result
+     * Maps dependency failures to {@code 503 SERVICE_UNAVAILABLE}.
+     *
+     * @param ex infrastructure-level exception
+     * @return standardized API error response with safe message
      */
     public ResponseEntity<ApiError> handleInfrastructure(InfrastructureException ex) {
         return build(HttpStatus.SERVICE_UNAVAILABLE, "INFRASTRUCTURE_ERROR", "Upstream dependency unavailable");
@@ -55,9 +60,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     /**
-     * Executes handleValidation.
-     * @param ex input argument used by this operation
-     * @return operation result
+     * Maps bean-validation failures on request bodies to {@code 400 BAD_REQUEST}.
+     *
+     * @param ex validation exception with field-level details
+     * @return standardized API error response
      */
     public ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldErrors().stream()
@@ -68,9 +74,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     /**
-     * Executes handleMalformedJson.
-     * @param ex input argument used by this operation
-     * @return operation result
+     * Maps malformed JSON payloads to {@code 400 BAD_REQUEST}.
+     *
+     * @param ex request deserialization failure
+     * @return standardized API error response
      */
     public ResponseEntity<ApiError> handleMalformedJson(HttpMessageNotReadableException ex) {
         return build(HttpStatus.BAD_REQUEST, "MALFORMED_REQUEST", "Malformed request body");
@@ -78,9 +85,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ConstraintViolationException.class)
     /**
-     * Executes handleConstraintViolation.
-     * @param ex input argument used by this operation
-     * @return operation result
+     * Maps parameter/path constraint violations to {@code 400 BAD_REQUEST}.
+     *
+     * @param ex constraint violation details
+     * @return standardized API error response
      */
     public ResponseEntity<ApiError> handleConstraintViolation(ConstraintViolationException ex) {
         return build(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", ex.getMessage());
@@ -88,9 +96,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     /**
-     * Executes handleBadRequest.
-     * @param ex input argument used by this operation
-     * @return operation result
+     * Maps semantic request errors to {@code 400 BAD_REQUEST}.
+     *
+     * @param ex argument-related failure
+     * @return standardized API error response
      */
     public ResponseEntity<ApiError> handleBadRequest(IllegalArgumentException ex) {
         return build(HttpStatus.BAD_REQUEST, "BAD_REQUEST", ex.getMessage());
@@ -98,9 +107,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     /**
-     * Executes handleUnexpected.
-     * @param ex input argument used by this operation
-     * @return operation result
+     * Provides safe fallback mapping for unexpected failures.
+     *
+     * @param ex uncaught exception
+     * @return standardized API error response with generic message
      */
     public ResponseEntity<ApiError> handleUnexpected(Exception ex) {
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "UNEXPECTED_ERROR", "Unexpected server error");

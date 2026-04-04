@@ -22,8 +22,11 @@ import org.springframework.stereotype.Component;
 
 @Component
 /**
- * RegionalFailoverManager implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure resilience coordinator for multi-region ACTIVE/PASSIVE operation.
+ *
+ * <p>Monitors DB, Redis, and Kafka health and gates write traffic when the region is degraded.
+ * In ACTIVE/PASSIVE mode, sustained dependency failures switch the node to PASSIVE; sustained
+ * recovery switches it back to ACTIVE.</p>
  */
 public class RegionalFailoverManager {
 
@@ -104,8 +107,12 @@ public class RegionalFailoverManager {
     }
 
     /**
-     * Executes allowsWrites.
-     * @return operation result
+     * Determines whether write operations are currently allowed in this region.
+     *
+     * <p>When multi-region is disabled, writes are always allowed. When enabled, PASSIVE mode
+     * blocks writes to reduce split-brain and inconsistent state during failover.</p>
+     *
+     * @return {@code true} if callers may execute write paths, otherwise {@code false}
      */
     public boolean allowsWrites() {
         if (!enabled) {
@@ -115,8 +122,9 @@ public class RegionalFailoverManager {
     }
 
     /**
-     * Executes currentMode.
-     * @return operation result
+     * Exposes current failover strategy and node mode for diagnostics.
+     *
+     * @return mode string in format {@code strategy:state}
      */
     public String currentMode() {
         return failoverStrategy + ":" + nodeState.get().name().toLowerCase();
@@ -124,7 +132,9 @@ public class RegionalFailoverManager {
 
     @Scheduled(fixedDelayString = "${app.multi-region.auto-failover.poll-ms:5000}")
     /**
-     * Executes monitorAndFailover.
+     * Runs periodic dependency health checks and applies failover/recovery policy.
+     *
+     * <p>Switching policy uses streak thresholds to avoid mode flapping on transient incidents.</p>
      */
     public void monitorAndFailover() {
         if (!enabled || !autoFailoverEnabled) {
@@ -250,7 +260,7 @@ public class RegionalFailoverManager {
 
     @PreDestroy
     /**
-     * Executes shutdown.
+     * Closes Kafka admin resources on container shutdown.
      */
     public void shutdown() {
         try {

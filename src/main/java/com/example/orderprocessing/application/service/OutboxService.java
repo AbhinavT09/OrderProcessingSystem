@@ -11,8 +11,10 @@ import org.springframework.stereotype.Service;
 
 @Service
 /**
- * OutboxService implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Application-layer helper for transactional outbox writes.
+ *
+ * <p>Used by command services to persist integration events in the same transactional boundary
+ * as domain state changes, enabling reliable asynchronous delivery.</p>
  */
 public class OutboxService {
 
@@ -35,9 +37,13 @@ public class OutboxService {
     }
 
     /**
-     * Executes enqueueOrderCreated.
-     * @param orderId input argument used by this operation
-     * @param event input argument used by this operation
+     * Enqueues an order-created integration event for asynchronous publication.
+     *
+     * <p>Validates/serializes payload through schema registry, assigns deterministic partition
+     * key from aggregate id, and stores event as {@code PENDING} for publisher pickup.</p>
+     *
+     * @param orderId aggregate identifier used for ordering/partitioning
+     * @param event event payload representing committed business change
      */
     public void enqueueOrderCreated(String orderId, OrderCreatedEvent event) {
         OutboxEntity outbox = new OutboxEntity();

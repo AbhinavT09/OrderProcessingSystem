@@ -7,8 +7,10 @@ import org.springframework.stereotype.Component;
 
 @Component
 /**
- * JpaProcessedEventRepository implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure adapter for processed-event dedup persistence.
+ *
+ * <p>Backs consumer idempotency by storing event processing markers and checking event ids
+ * before applying state transitions.</p>
  */
 public class JpaProcessedEventRepository implements ProcessedEventRepository {
 
@@ -24,9 +26,10 @@ public class JpaProcessedEventRepository implements ProcessedEventRepository {
 
     @Override
     /**
-     * Executes existsByEventId.
-     * @param eventId input argument used by this operation
-     * @return operation result
+     * Checks whether an event id has already been processed.
+     *
+     * @param eventId integration event identifier
+     * @return true when an existing marker is present
      */
     public boolean existsByEventId(String eventId) {
         return repository.existsByEventId(eventId);
@@ -34,9 +37,10 @@ public class JpaProcessedEventRepository implements ProcessedEventRepository {
 
     @Override
     /**
-     * Executes save.
-     * @param event input argument used by this operation
-     * @return operation result
+     * Persists a processed-event marker.
+     *
+     * @param event processed event marker
+     * @return persisted marker entity
      */
     public ProcessedEventEntity save(ProcessedEventEntity event) {
         return repository.save(event);

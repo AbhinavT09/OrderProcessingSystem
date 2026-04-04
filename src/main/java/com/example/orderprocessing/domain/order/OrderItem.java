@@ -1,8 +1,10 @@
 package com.example.orderprocessing.domain.order;
 
 /**
- * OrderItem record captures immutable data transferred between layers.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Domain value object representing one order line item.
+ *
+ * <p>Belongs to the domain layer and models purchased product attributes independent of
+ * transport or persistence concerns.</p>
  */
 public record OrderItem(String productName, Integer quantity, Double price) {
 }

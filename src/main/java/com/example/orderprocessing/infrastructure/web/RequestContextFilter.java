@@ -16,8 +16,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 @Component("requestIdFilter")
 /**
- * RequestContextFilter implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure web filter that injects request correlation and region context.
+ *
+ * <p>Ensures every request has stable identifiers for tracing/logging and records
+ * request/latency/error metrics tagged by method, path, status, and region.</p>
  */
 public class RequestContextFilter extends OncePerRequestFilter {
 

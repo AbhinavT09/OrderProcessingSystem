@@ -7,8 +7,10 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
- * AbstractOrderState implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Base domain implementation for shared state-transition behavior.
+ *
+ * <p>Centralizes transition-map resolution and default conflict/no-op policies so concrete
+ * states only declare permitted moves.</p>
  */
 abstract class AbstractOrderState implements OrderState {
 

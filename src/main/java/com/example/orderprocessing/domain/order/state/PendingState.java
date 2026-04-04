@@ -5,8 +5,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /**
- * PendingState implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Domain state representing newly created orders awaiting processing.
  */
 public class PendingState extends AbstractOrderState {
 
@@ -18,8 +17,7 @@ public class PendingState extends AbstractOrderState {
 
     @Override
     /**
-     * Executes status.
-     * @return operation result
+     * Returns {@code PENDING}.
      */
     public OrderStatus status() {
         return OrderStatus.PENDING;
@@ -27,8 +25,7 @@ public class PendingState extends AbstractOrderState {
 
     @Override
     /**
-     * Executes cancel.
-     * @return operation result
+     * Allows cancellation directly from pending state.
      */
     public OrderState cancel() {
         return new CancelledState();
@@ -36,8 +33,7 @@ public class PendingState extends AbstractOrderState {
 
     @Override
     /**
-     * Executes promotePendingToProcessing.
-     * @return operation result
+     * Advances pending order to processing state.
      */
     public OrderState promotePendingToProcessing() {
         return new ProcessingState();

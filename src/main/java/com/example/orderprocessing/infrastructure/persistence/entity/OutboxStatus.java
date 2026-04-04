@@ -1,8 +1,10 @@
 package com.example.orderprocessing.infrastructure.persistence.entity;
 
 /**
- * OutboxStatus enum enumerates constrained values used by the workflow.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Delivery lifecycle states for outbox rows.
+ *
+ * <p>{@code PENDING} indicates ready/new work, {@code FAILED} indicates retryable in-flight failure,
+ * and {@code SENT} indicates successful publication.</p>
  */
 public enum OutboxStatus {
     PENDING,

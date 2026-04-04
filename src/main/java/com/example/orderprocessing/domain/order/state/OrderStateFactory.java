@@ -3,8 +3,10 @@ package com.example.orderprocessing.domain.order.state;
 import com.example.orderprocessing.domain.order.OrderStatus;
 
 /**
- * OrderStateFactory implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Domain factory that maps status values to concrete state implementations.
+ *
+ * <p>Used during aggregate rehydration so persisted status is restored with correct
+ * transition behavior.</p>
  */
 public final class OrderStateFactory {
 

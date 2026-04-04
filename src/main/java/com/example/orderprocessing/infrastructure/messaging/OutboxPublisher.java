@@ -25,8 +25,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Component
 /**
- * OutboxPublisher implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure scheduler for transactional outbox delivery.
+ *
+ * <p>Coordinates partition-aware polling, bounded parallel processing, and cleanup of sent events.
+ * The component provides backpressure through an in-flight semaphore and bounded batch size to
+ * avoid overwhelming downstream Kafka infrastructure.</p>
+ *
+ * <p>Duplicate publication risk is reduced by lease/claim semantics in the fetcher and by explicit
+ * status transitions handled by processor/retry collaborators.</p>
  */
 public class OutboxPublisher {
 
@@ -96,7 +102,14 @@ public class OutboxPublisher {
 
     @Scheduled(fixedDelayString = "${app.outbox.publisher.poll-ms:2000}")
     /**
-     * Executes pollAndPublish.
+     * Runs one scheduled publish cycle for all partitions owned by this instance.
+     *
+     * <p>Behavioral guarantees:</p>
+     * <ul>
+     *   <li>Applies backpressure by skipping when worker capacity is saturated.</li>
+     *   <li>Bounds work with per-partition batches to keep latency predictable.</li>
+     *   <li>Delegates retry and terminal-failure transitions to outbox processing pipeline.</li>
+     * </ul>
      */
     public void pollAndPublish() {
         refreshGauges();
@@ -128,7 +141,10 @@ public class OutboxPublisher {
 
     @Scheduled(fixedDelayString = "${app.outbox.cleanup.poll-ms:60000}")
     /**
-     * Executes cleanupSentEvents.
+     * Archives and purges old sent outbox rows.
+     *
+     * <p>This keeps the active outbox table small for faster claim scans while preserving
+     * historical observability in archive storage.</p>
      */
     public void cleanupSentEvents() {
         Instant cutoff = Instant.now().minus(cleanupRetentionDays, ChronoUnit.DAYS);
@@ -168,7 +184,7 @@ public class OutboxPublisher {
 
     @PreDestroy
     /**
-     * Executes shutdown.
+     * Gracefully stops background workers during container shutdown.
      */
     public void shutdown() {
         partitionExecutor.shutdown();

@@ -1,124 +1,92 @@
-# Components and Tooling Rationale
+# Components and Tooling
 
-## Component-level design with real-world examples
+## 1. Component Boundaries
 
-### Interface HTTP boundary
+### Interface components
 
-- `interfaces/http` (`OrderController` + DTOs) isolates transport concerns from core logic.
-- `GlobalExceptionHandler` ensures stable error contract regardless of internal exception source.
+- `OrderController`: HTTP endpoint adapter for command/query operations
+- DTOs: request/response transport contracts and validation shape
+- `GlobalExceptionHandler`: maps internal exceptions to stable API error schema
 
-Real-world example:
+### Application components
 
-- Mobile app sends malformed JSON -> API returns deterministic `MALFORMED_REQUEST` instead of raw stack traces.
+- `OrderService`: command-side orchestration and transactional write behavior
+- `OrderQueryService`: read-side cache-aside orchestration
+- `OutboxService`: persistence of integration events for async publication
+- ports: repository/cache/publisher abstractions for infrastructure substitution
 
-### Write side (`OrderService` + `OutboxService`)
+### Domain components
 
-- Handles strict write correctness and side effects separation.
-- Outbox record is persisted in same transaction as order write.
+- `Order`: aggregate root with lifecycle behavior
+- `OrderState` hierarchy: transition policy per lifecycle state
+- `OrderStatus` and `OrderItem`: domain value representations
 
-Real-world example:
+### Infrastructure components
 
-- Kafka cluster has transient outage at order time: customer still gets `201`, and outbox retries publish later.
+- persistence adapters: JPA-backed implementations of application ports
+- messaging pipeline: outbox scheduler/fetcher/processor/retry + producer/consumer
+- resilience/crosscutting: failover manager, global idempotency coordinator
+- web/security: request context, rate limiting, JWT claim conversion
 
-### Read side (`OrderQueryService` + cache)
+## 2. Why These Components Exist
 
-- Cache-aside with TTL to optimize hot reads.
-- Coalescing lock prevents stampede on cache misses.
+- Keep transport, business rules, and technical concerns independently changeable
+- Maximize write correctness without sacrificing async throughput
+- Preserve read availability under cache degradation
+- Make failure handling explicit and observable
 
-Real-world example:
+## 3. Component Interaction Patterns
 
-- Flash-sale product causes thousands of reads for same order status -> one DB read fills cache, others reuse it.
+### 3.1 Command side pattern
 
-### Async event processing (`OrderCreatedConsumer`)
+- Controller -> `OrderService` -> repository/outbox ports
+- idempotency check + regional gating before durable write
+- cache eviction after successful mutation
 
-- Delayed transitions with retry-topic model.
-- Idempotent consume + manual ack only after success.
+### 3.2 Event publication pattern
 
-Real-world example:
+- write transaction persists outbox row
+- scheduled workers publish asynchronously to Kafka
+- retry policy managed by outbox components, not controllers/services
 
-- Consumer crashes after processing but before offset commit on one instance; re-delivery occurs, dedupe check prevents double-processing.
+### 3.3 Event consumption pattern
 
-### Schema evolution layer (`VersionedJsonOrderCreatedEventSchemaRegistry`)
+- consumer validates payload
+- dedupe check + transition + processed marker in transaction
+- retries and DLT separation for transient vs terminal failures
 
-- Central contract authority for event shape/validation.
-- Ensures producer and consumer use the same compatibility rules.
+## 4. Tooling and Rationale
 
-Real-world example:
+### Runtime and framework
 
-- Region A deploys with schema v2 while Region B still processes v1 payloads; events continue to parse because `schemaVersion` is backward/forward compatible by design.
+- **Spring Boot**: dependency management, lifecycle, actuator integration
+- **Spring Web**: HTTP routing and validation integration
+- **Spring Security/OAuth2 Resource Server**: JWT-based authN/authZ
 
-### Multi-region resilience layer (`RegionalFailoverManager` + `GlobalIdempotencyService`)
+### Persistence and messaging
 
-- Failover manager monitors DB/Redis/Kafka health and toggles write mode in active-passive setups.
-- Global idempotency lock/resolution reduces duplicate creates when traffic shifts regions.
+- **Spring Data JPA + Hibernate**: relational persistence, optimistic locking, query abstraction
+- **Spring Kafka**: producer/consumer plumbing, retry-topic and DLT support
+- **Spring Data Redis (Lettuce)**: distributed cache/rate-limiter state and resilience controls
 
-Real-world example:
+### Observability and operations
 
-- During DNS failover, client retries same create request to secondary region. Global idempotency mapping returns original `orderId` instead of creating a duplicate.
+- **Micrometer + Prometheus**: application and infra metrics
+- **OpenTelemetry bridge**: trace emission for distributed diagnostics
 
-## Tooling rationale (accurate to current implementation)
+### Build and test
 
-### Spring Boot
-- Provides app lifecycle, dependency injection, actuator, and convention-driven wiring.
+- **Maven**: build lifecycle and dependency management
+- **JUnit 5 + Mockito + Spring test stack**: layered unit/integration testing
 
-### Spring Web
-- Declarative REST APIs and request validation integration.
+## 5. Component-Level Failure Behavior
 
-### Spring Data JPA + Hibernate
-- Entity persistence, custom repository methods, optimistic locking.
-
-### Spring Data Redis (Lettuce)
-- Distributed cache and distributed rate limiter state store.
-- HA options: cluster/sentinel, reconnect, pool tuning, and timeout controls.
-
-### Kafka + Spring Kafka
-- Durable async event pipeline, consumer groups, retry topics, DLQ.
-- Supports schema-versioned JSON event contracts through a dedicated registry abstraction.
-
-### Spring Retry
-- Complements transient failure handling patterns.
-
-### Spring Security + OAuth2 Resource Server
-- JWT validation, role mapping, endpoint authorization.
-
-### Micrometer + Prometheus
-- Unified instrumentation for business + infra metrics.
-- Tracks schema validation, version distribution, regional traffic, and failover events.
-
-### OpenTelemetry (Micrometer bridge)
-- Trace export to OTLP endpoint for distributed diagnostics.
-
-### Maven + Surefire + JUnit 5
-- Reproducible build/test lifecycle and layered testing.
-
-## Failure-case design by tool
-
-### Redis cache failure
-- Tool behavior: exceptions caught inside `RedisCacheProvider`.
-- Outcome: fallback to DB read path.
-- Additional behavior: circuit breaker opens after repeated failures to reduce hot-path latency impact.
-
-### Redis rate limiter failure
-- Tool behavior: limiter fail-open with warning log.
-- Outcome: availability preserved, but throttling temporarily relaxed.
-
-### Kafka producer failure
-- Tool behavior: `KafkaEventPublisher` performs async single-attempt send and surfaces failure to outbox; outbox keeps event pending/failed with retries.
-- Outcome: eventual publish once dependency recovers.
-
-### Kafka consumer duplicate delivery
-- Tool behavior: processed-event dedupe check first.
-- Outcome: duplicate message skipped safely.
-
-### Schema validation failure
-- Tool behavior: registry rejects invalid payload and increments `kafka.schema.validation.errors`.
-- Outcome: bad event does not mutate domain state.
-
-### Regional failover
-- Tool behavior: failover manager transitions node to passive on sustained dependency failure.
-- Outcome: write APIs are blocked until region health is restored.
-
-### DB optimistic lock conflict
-- Tool behavior: version mismatch triggers conflict exception.
-- Outcome: API returns conflict, client retries with fresh state.
+| Component | Failure scenario | Expected behavior |
+|---|---|---|
+| `RedisCacheProvider` | Redis unavailable | fail-soft cache miss, DB fallback |
+| `RateLimitingFilter` | Redis eval failure | fail-open request path |
+| `KafkaEventPublisher` | broker send errors | async failure surfaced to outbox retry flow |
+| `OrderCreatedConsumer` | duplicate delivery | dedupe marker prevents repeated mutation |
+| `RegionalFailoverManager` | sustained unhealthy deps | switch passive, block writes |
+| `OrderService` | stale version update | conflict response, no lost update |
 

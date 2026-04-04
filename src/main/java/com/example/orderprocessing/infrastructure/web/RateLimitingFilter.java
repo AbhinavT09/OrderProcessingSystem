@@ -25,8 +25,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 @Component
 /**
- * RateLimitingFilter implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure web filter enforcing per-client request rate limits.
+ *
+ * <p>Implements a Redis-backed token bucket via Lua for atomic refill-and-consume behavior
+ * across distributed instances. Fails open on Redis outages to prioritize API availability.</p>
  */
 public class RateLimitingFilter extends OncePerRequestFilter {
 

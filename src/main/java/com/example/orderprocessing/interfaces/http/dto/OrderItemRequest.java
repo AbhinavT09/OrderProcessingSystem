@@ -5,8 +5,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 /**
- * OrderItemRequest record captures immutable data transferred between layers.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * HTTP DTO representing one order line item in create requests.
+ *
+ * <p>Defines interface-layer validation constraints for product, quantity, and price fields.</p>
  */
 public record OrderItemRequest(
         @NotBlank String productName,

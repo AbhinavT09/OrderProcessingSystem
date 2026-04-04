@@ -14,8 +14,10 @@ import java.time.Instant;
         @UniqueConstraint(name = "uk_processed_event_id", columnNames = "eventId")
 })
 /**
- * ProcessedEventEntity implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Persistence marker for idempotent event consumption.
+ *
+ * <p>Each row records a processed event id/type and timestamp so consumers can skip duplicates
+ * caused by retries, replays, or partition reassignments.</p>
  */
 public class ProcessedEventEntity {
 

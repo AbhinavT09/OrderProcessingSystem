@@ -5,15 +5,13 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /**
- * CancelledState implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Terminal domain state for cancelled orders.
  */
 public class CancelledState extends AbstractOrderState {
 
     @Override
     /**
-     * Executes status.
-     * @return operation result
+     * Returns {@code CANCELLED}.
      */
     public OrderStatus status() {
         return OrderStatus.CANCELLED;

@@ -5,15 +5,13 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /**
- * DeliveredState implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Terminal domain state for successfully delivered orders.
  */
 public class DeliveredState extends AbstractOrderState {
 
     @Override
     /**
-     * Executes status.
-     * @return operation result
+     * Returns {@code DELIVERED}.
      */
     public OrderStatus status() {
         return OrderStatus.DELIVERED;

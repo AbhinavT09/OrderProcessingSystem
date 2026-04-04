@@ -27,8 +27,10 @@ import org.springframework.web.bind.annotation.RestController;
 @Validated
 @RequestMapping("/orders")
 /**
- * OrderController implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * HTTP interface adapter for order commands and queries.
+ *
+ * <p>Belongs to the interface layer and delegates all business decisions to application services.
+ * Keeps transport concerns (validation, headers, path/query binding) separate from domain logic.</p>
  */
 public class OrderController {
 
@@ -48,10 +50,14 @@ public class OrderController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     /**
-     * Creates a new order using an optional idempotency key.
-     * @param request validated create-order payload
-     * @param idempotencyKey optional request idempotency key
-     * @return created order view
+     * Accepts order creation command with optional idempotency header.
+     *
+     * <p>When the header is supplied, duplicate client retries can be collapsed into a single
+     * committed order outcome by the application-layer idempotency workflow.</p>
+     *
+     * @param request validated order payload
+     * @param idempotencyKey optional retry-correlation key from client
+     * @return created order, or previously completed order for same key
      */
     public OrderResponse create(
             @Valid @RequestBody CreateOrderRequest request,
@@ -61,9 +67,10 @@ public class OrderController {
 
     @GetMapping("/{id}")
     /**
-     * Returns byId value.
-     * @param id input argument used by this operation
-     * @return operation result
+     * Retrieves a single order view by identifier.
+     *
+     * @param id order identifier
+     * @return materialized order response
      */
     public OrderResponse getById(@PathVariable UUID id) {
         return orderQueryService.getById(id);
@@ -71,10 +78,11 @@ public class OrderController {
 
     @PatchMapping("/{id}/status")
     /**
-     * Executes updateStatus.
-     * @param id input argument used by this operation
-     * @param request input argument used by this operation
-     * @return operation result
+     * Applies status transition command with optimistic concurrency version.
+     *
+     * @param id order identifier
+     * @param request target status and expected version
+     * @return updated order response
      */
     public OrderResponse updateStatus(@PathVariable UUID id, @Valid @RequestBody UpdateOrderStatusRequest request) {
         return orderService.updateStatus(id, request.status(), request.version());
@@ -82,9 +90,10 @@ public class OrderController {
 
     @GetMapping
     /**
-     * Lists orders, optionally filtered by status.
-     * @param status optional order status filter
-     * @return ordered list of matching orders
+     * Lists orders, optionally filtered by domain status.
+     *
+     * @param status optional status filter
+     * @return order responses matching filter criteria
      */
     public List<OrderResponse> list(@RequestParam(required = false) OrderStatus status) {
         return orderQueryService.list(status);
@@ -92,9 +101,10 @@ public class OrderController {
 
     @PatchMapping("/{id}/cancel")
     /**
-     * Executes cancel.
-     * @param id input argument used by this operation
-     * @return operation result
+     * Requests cancellation of an order.
+     *
+     * @param id order identifier
+     * @return cancelled order response when domain rules allow it
      */
     public OrderResponse cancel(@PathVariable UUID id) {
         return orderService.cancel(id);

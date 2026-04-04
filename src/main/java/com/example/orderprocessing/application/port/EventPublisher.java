@@ -4,14 +4,17 @@ import com.example.orderprocessing.application.event.OrderCreatedEvent;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * EventPublisher interface defines a stable boundary used by collaborating components.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Application port for publishing integration events.
+ *
+ * <p>Implemented by infrastructure messaging adapters (Kafka) and consumed by outbox processor
+ * to keep write-path reliability concerns outside core application logic.</p>
  */
 public interface EventPublisher {
     /**
-     * Performs publishOrderCreated.
-     * @param event input argument used by this operation
-     * @return operation result
+     * Publishes a committed order-created event asynchronously.
+     *
+     * @param event event payload derived from durable order state
+     * @return future that completes when publication succeeds or fails
      */
     CompletableFuture<Void> publishOrderCreated(OrderCreatedEvent event);
 }

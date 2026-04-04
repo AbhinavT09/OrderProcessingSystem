@@ -18,8 +18,10 @@ import java.util.UUID;
         @Index(name = "idx_outbox_created_at", columnList = "createdAt")
 })
 /**
- * OutboxEntity implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Active transactional outbox row for deferred event publication.
+ *
+ * <p>Captures event payload, delivery status, retry metadata, and partition key used by
+ * publisher workers for ordered, scalable processing.</p>
  */
 public class OutboxEntity {
 
@@ -59,7 +61,10 @@ public class OutboxEntity {
 
     @PrePersist
     /**
-     * Executes prePersist.
+     * Initializes defaults before first insert.
+     *
+     * <p>Ensures identifiers, timestamps, retry counters, and baseline status are present so
+     * publisher logic can rely on consistent persistence state.</p>
      */
     public void prePersist() {
         Instant now = Instant.now();
@@ -86,7 +91,7 @@ public class OutboxEntity {
 
     @PreUpdate
     /**
-     * Executes preUpdate.
+     * Refreshes update timestamp on each mutation.
      */
     public void preUpdate() {
         updatedAt = Instant.now();

@@ -33,8 +33,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Component
 /**
- * OrderCreatedConsumer implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure consumer for {@code ORDER_CREATED} events.
+ *
+ * <p>Consumes Kafka messages, validates schema, and applies idempotent state progression to the
+ * local order aggregate projection. Retries transient failures and routes terminal failures to DLQ
+ * for operator investigation.</p>
  */
 public class OrderCreatedConsumer {
 
@@ -93,9 +96,17 @@ public class OrderCreatedConsumer {
     )
     @KafkaListener(topics = "${app.kafka.order-events-topic:order.events}", groupId = "${app.kafka.consumer-group:order-processing-group}")
     /**
-     * Executes consume.
-     * @param payload input argument used by this operation
-     * @param acknowledgment input argument used by this operation
+     * Processes one Kafka record with retry-aware, idempotent semantics.
+     *
+     * <p>Key behaviors:</p>
+     * <ul>
+     *   <li>Rejects premature processing when event delay window has not elapsed.</li>
+     *   <li>Executes processing transactionally with processed-event dedup marker.</li>
+     *   <li>Acknowledges duplicates safely; retries transient DB and timing failures.</li>
+     * </ul>
+     *
+     * @param payload serialized order-created event
+     * @param acknowledgment manual acknowledgment handle for offset commits
      */
     public void consume(String payload, Acknowledgment acknowledgment) {
         try {
@@ -135,11 +146,16 @@ public class OrderCreatedConsumer {
 
     @DltHandler
     /**
-     * Handles terminally failed records routed to the dead-letter topic.
+     * Handles records that exhausted retries and were sent to dead-letter topic.
+     *
+     * <p>Publishes failure telemetry and structured logs for operational triage. Attempts best-effort
+     * event parsing to include event/order identifiers in diagnostics.</p>
+     *
      * @param payload dead-letter payload
-     * @param offset Kafka record offset
-     * @param partition Kafka partition
-     * @param topic dead-letter topic name
+     * @param topic source dead-letter topic
+     * @param partition source partition
+     * @param offset source offset
+     * @param exceptionMessage broker-provided terminal failure context
      */
     public void onDlt(
             String payload,

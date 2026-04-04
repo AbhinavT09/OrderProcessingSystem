@@ -1,8 +1,8 @@
 # Observability, Logging, Monitoring, and Operations
 
-## 1) Logging implementation details
+## 1. Logging Model
 
-Structured JSON logging includes:
+Structured logging fields include:
 
 - `timestamp`, `level`, `logger`, `message`
 - `request_id` from `RequestContextFilter`
@@ -12,7 +12,7 @@ Structured JSON logging includes:
 
 `X-Request-Id` is accepted/generated and returned to clients, enabling incident correlation.
 
-## 2) Metrics catalog (current implementation)
+## 2. Metrics Catalog (Current Implementation)
 
 ### HTTP and API metrics
 
@@ -21,7 +21,7 @@ Structured JSON logging includes:
 - `http.server.request.errors`
 - `http.server.requests.by.region`
 
-### Business/service metrics
+### Business and service metrics
 
 - `orders.service.request.count`
 - `orders.created.count`
@@ -56,7 +56,7 @@ Structured JSON logging includes:
 - `outbox.lag`
 - `outbox.retry.count`
 
-### Kafka consumer metrics
+### Kafka and schema metrics
 
 - `kafka.consumer.errors`
 - `kafka.consumer.lag.ms`
@@ -71,7 +71,7 @@ Structured JSON logging includes:
 - `failover.events.count`
 - `region.health.unhealthy.count`
 
-## 3) Tracing
+## 3. Tracing
 
 Configured through Micrometer bridge and OTLP endpoint:
 
@@ -80,7 +80,7 @@ Configured through Micrometer bridge and OTLP endpoint:
 
 Use traces + request_id for end-to-end debugging.
 
-## 4) Reliability and retry behavior
+## 4. Reliability and Retry Behavior
 
 ### Outbox pipeline (`OutboxPublisher` + `OutboxFetcher` + `OutboxProcessor` + `OutboxRetryHandler`)
 
@@ -98,7 +98,27 @@ Use traces + request_id for end-to-end debugging.
 - Retry topics with exponential backoff and max attempts; DLT handler logs payload context and headers.
 - Versioned schema parsing with fallback compatibility logic.
 
-## 5) DLQ operations guidance
+## 5. Operational Alerts and Interpretation
+
+### High outbox backlog
+
+- Signals: rising `outbox.pending.count` and `outbox.failure.count`
+- Likely causes: broker issues, schema failures, retry pressure
+- Actions: validate broker health, inspect retry logs, verify schema errors
+
+### Elevated cache degradation
+
+- Signals: rising `cache.error.count` / `cache.degraded.mode.count`
+- Likely causes: Redis connectivity/latency issues
+- Actions: check Redis health, verify fallback DB latency capacity
+
+### Retry storm / DLT growth
+
+- Signals: rising `kafka.consumer.retry.count`, `kafka.consumer.dlq.count`
+- Likely causes: malformed payloads, persistent downstream dependency issues
+- Actions: inspect DLT payload contexts, classify and replay only safe records
+
+## 6. DLQ Operations Guidance
 
 When `kafka.consumer.dlq.count` rises:
 
@@ -110,7 +130,7 @@ When `kafka.consumer.dlq.count` rises:
 3. Decide replay/ignore policy.
 4. Apply fix and replay if safe.
 
-## 6) Real-world monitoring scenarios
+## 7. Real-world Monitoring Scenarios
 
 ### Scenario: Kafka outage
 
@@ -177,7 +197,7 @@ Action:
 2. Confirm global traffic router moved writes to healthy region.
 3. Track recovery and verify node returns active state.
 
-## 7) Runbook checkpoints
+## 8. Runbook Checkpoints
 
 - Verify Kafka connectivity and topic health.
 - Verify Redis availability and latency.

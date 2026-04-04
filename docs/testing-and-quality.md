@@ -1,67 +1,80 @@
-# Testing and Quality Strategy
+# Testing and Quality
 
-## Test layers
+## 1. Testing Objectives
 
-### Domain tests
+- validate correctness of domain transitions and write invariants
+- verify idempotency lifecycle semantics under retries/concurrency
+- prove outbox/event flow reliability under failure conditions
+- ensure API contracts remain stable for success and error paths
+- verify degradation behavior for Redis/Kafka/regional dependencies
+
+## 2. Current Test Coverage (Implemented)
+
+### Domain layer
+
 - `OrderAggregateTest`
-- Verifies state machine invariants and transition rules.
+  - valid transition paths
+  - invalid transition conflicts
+  - cancellation invariants
 
-### API integration tests
-- `OrderControllerIntegrationTest`
-- Validates auth/rbac/validation contracts and endpoint behavior.
+### Application layer
 
-### Contract tests
-- `OrderCreatedEventContractTest`
-- Ensures event schema compatibility over time.
+- `OrderServiceIdempotencyLifecycleTest`
+  - same key same outcome
+  - in-progress duplicate rejection and safe retry
+  - completed reuse behavior
+  - duplicate prevention under concurrent retries
+- `OutboxServiceTest`
+  - outbox row creation shape and defaults
 
-### Consumer behavior tests
+### Messaging/outbox components
+
+- `OutboxProcessorTest`
+- `OutboxPublisherTest`
+- `KafkaEventPublisherTest`
 - `OrderCreatedConsumerUnitTest`
-- Verifies delayed promotion and processed-marker write.
 
-### Multi-region and resilience tests (recommended additions)
-- Failover manager state transition test (`active -> passive -> active`)
-- Write gating test when node state is passive
-- Global idempotency lock/resolve behavior test
+Coverage focus:
 
-## Failure-oriented test recommendations (next additions)
+- async publish result handling
+- retry transitions and status updates
+- consumer dedupe and delayed processing behavior
 
-To fully mirror runtime resilience, add:
+### Infrastructure/resilience
 
-1. **Outbox retry tests**
-   - publish failure increments retry count and leaves status FAILED
-   - success transition to SENT
+- `RedisCacheProviderTest`
+- `RateLimitingFilterTest`
+- `RegionalFailoverManagerTest`
 
-2. **Rate limiter Redis script tests**
-   - token-bucket allows within limit, blocks beyond capacity
-   - key structure contains user/path/ip dimensions
+Coverage focus:
 
-3. **Consumer ack tests**
-   - ack called only after successful process
-   - no ack on retry-throwing paths
+- cache hit/miss/degraded behavior
+- limiter allow/block/fail-open
+- active/passive switching and write gating signals
 
-4. **DLQ handler tests**
-   - verifies metric increment and enriched log context fields
+### API integration
 
-5. **Cache TTL tests**
-   - ID cache uses 5 min TTL
-   - list cache uses 1 min TTL
+- `OrderControllerIntegrationTest`
+  - create/read/status/cancel route behavior
+  - idempotency behavior at HTTP boundary
+  - validation and error contract behavior
 
-6. **Schema evolution tests**
-   - v1 payload without `schemaVersion` still processes
-   - v2 payload validates and publishes
-   - future version + optional fields remains parseable
-   - missing required fields fail validation with metric increment
+## 3. Test Design Standards
 
-7. **Regional behavior tests**
-   - region-aware `X-Region-Id` propagation in `RequestContextFilter`
-   - `http.server.requests.by.region` metric increments
-   - `failover.events.count` increments on state switch
+- deterministic and independent test execution
+- meaningful assertions on business outcomes, not implementation details
+- minimal over-mocking of core orchestration logic
+- integration tests for cross-component critical paths
 
-## Quality principles
+## 4. Residual Gaps / Next Expansion
 
-- Correctness-first writes (idempotency + optimistic locking + outbox)
-- Eventual consistency for async transitions with bounded retries
-- Degrade gracefully on cache/redis outages
-- Observable by default (logs/metrics/traces)
-- Region-aware operations and deterministic failover behavior
+- embedded Kafka end-to-end verification (outbox -> producer -> consumer)
+- explicit no-event-loss crash-injection integration around outbox loop
+- deterministic active-recovery-to-active integration with controlled dependency health
+
+## 5. Quality Gates
+
+- `mvn clean compile` must pass
+- targeted reliability suites should pass before broad runs
+- API and idempotency regression tests are mandatory for write-path changes
 

@@ -1,205 +1,146 @@
 # Design and Architecture
 
-## 1) Architectural style
+## 1. Architectural Principles
 
-The project uses **Hexagonal Architecture + CQRS + DDD Aggregate**:
+The service is implemented with **Hexagonal Architecture**, **CQRS**, and **DDD aggregate modeling**.
 
-- **Domain layer:** business invariants and state transitions only
-- **Application layer:** use-case orchestration and ports
-- **Infrastructure layer:** Kafka, Redis, persistence, filters, security adapters, resilience/idempotency modules
-- **Interface layer (HTTP):** HTTP transport + DTO + exception mapping
+- **Interface layer (`interfaces/http`)**: transport contracts, validation, error mapping
+- **Application layer (`application/*`)**: command/query orchestration, ports, transactional boundaries
+- **Domain layer (`domain/order/*`)**: aggregate behavior and state transition invariants
+- **Infrastructure layer (`infrastructure/*`)**: persistence, messaging, cache, security, resilience, crosscutting controls
 
 CQRS split:
 
-- **Write:** `OrderService`
-- **Read:** `OrderQueryService`
+- **Write side**: `OrderService`
+- **Read side**: `OrderQueryService`
 
-## 2) Why this design (real-world reasoning)
+## 2. Core Design Decisions
 
-- In a real e-commerce checkout system, you need **strict write correctness** (no duplicate order creation, no lost updates) and **fast reads** (cache backed).
-- Messaging is asynchronous because payment/fulfillment style flows are not always immediate.
-- Outbox is used to prevent the "DB commit succeeded but Kafka failed" inconsistency.
+### 2.1 Transactional Outbox over direct Kafka publish
 
-## 3) Domain model and invariants
+Reason: commit order state and integration event atomically from the write transaction perspective.
 
-### Aggregate root: `Order`
+- Order write and outbox row are persisted in one DB transaction
+- Kafka publication is handled asynchronously by outbox workers
+- Prevents "DB committed, broker send failed" inconsistency
 
-`Order` encapsulates lifecycle behavior:
+### 2.2 State pattern for order lifecycle
 
-- `updateStatus(target)`
-- `cancel()`
-- `promotePendingToProcessing()`
+Reason: enforce legal transitions in domain code, not controller/service condition chains.
 
-### State Pattern
+- `Order` delegates behavior to `OrderState`
+- Concrete states: `PendingState`, `ProcessingState`, `ShippedState`, `DeliveredState`, `CancelledState`
+- Illegal transitions fail with `ConflictException`
 
-`OrderState` implementations enforce legal transitions:
+### 2.3 Global idempotency lifecycle states
 
-- `PendingState`
-- `ProcessingState`
-- `ShippedState`
-- `DeliveredState`
-- `CancelledState`
+Reason: avoid false completion and data loss during partial failures.
 
-Invalid transitions throw `ConflictException`.
+- `IN_PROGRESS`: request accepted, business write not yet finalized
+- `COMPLETED`: order commit succeeded and key is mapped to `orderId`
+- completion is marked after commit via transaction synchronization
 
-## 4) Consistency model
+### 2.4 Active/passive write gating
 
-### Strong consistency
+Reason: prevent unsafe writes during regional dependency instability.
 
-- Order writes in DB transaction
-- Optimistic locking (`@Version`) for update/cancel races
-- Idempotent order creation with unique idempotency key
+- `RegionalFailoverManager` monitors DB/Redis/Kafka health
+- sustained unhealthy thresholds move region to passive
+- write APIs are gated via `allowsWrites()`
 
-### Eventual consistency
+## 3. Consistency Model
 
-- `PENDING -> PROCESSING` is asynchronous via Kafka consumer delay
-- Retries + DLQ for transient/non-transient failures
+### Strong consistency paths
 
-## 5) Transactional Outbox implementation
+- `OrderEntity` writes inside transaction boundaries
+- optimistic locking on updates/cancel (`@Version`)
+- idempotent create semantics with durable key lifecycle
 
-### Write transaction flow
+### Eventual consistency paths
 
-1. Persist `OrderEntity`
-2. Persist `OutboxEntity(status=PENDING, payload=OrderCreatedEvent)`
-3. Commit transaction
+- post-create progression to `PROCESSING` via Kafka consumer
+- outbox retries/backoff for asynchronous publication
+- retry topics and DLT for consumer-side failure isolation
 
-No Kafka call occurs inside this transaction.
+## 4. Write Path Architecture
 
-### Publisher flow
+### 4.1 Create order flow
 
-Outbox publishing is now split across `OutboxPublisher` (scheduler), `OutboxFetcher` (partition claim), `OutboxProcessor` (async publish), and `OutboxRetryHandler` (retry/backoff).
+1. Validate request and authorize endpoint
+2. Check regional write mode
+3. Resolve idempotency state
+4. Persist order + outbox event in one transaction
+5. Return response
+6. Mark idempotency key `COMPLETED` after commit
 
-Scheduler cycle behavior:
+### 4.2 Update and cancel flow
 
-- `OutboxFetcher` claims partition-owned rows transactionally and enforces deterministic per-batch ordering.
-- `OutboxProcessor` marks in-flight lease (`FAILED` + `nextAttemptAt`) before async send to reduce duplicate claims.
-- Success path marks `SENT` and records lag/rate metrics.
-- `OutboxRetryHandler` increments retries, applies exponential backoff, and parks terminal failures after max retries.
+- retrieve aggregate snapshot
+- apply state transition/cancel behavior in domain model
+- persist with optimistic version checks
+- evict query cache entries
 
-## 6) Kafka consumer reliability design
+## 5. Outbox Publication Pipeline
 
-`OrderCreatedConsumer` correctness controls:
+Components:
 
-- `processEventInTransaction(...)` wraps dedupe check, state transition, and processed-marker insert in one transaction boundary.
-- Manual ack mode (`manual_immediate`) and ack only on success or duplicate-safe marker race path.
-- Retry-topic based delayed retries; bounded attempts
-- DLQ handler with rich context logging (topic/partition/offset/event ids)
-- Rebalance lifecycle visibility via `KafkaConsumerRebalanceObserver`
+- `OutboxPublisher`: scheduler + backpressure + worker orchestration
+- `OutboxFetcher`: partition-aware due row claim
+- `OutboxProcessor`: async publish + success transition
+- `OutboxRetryHandler`: retry policy and next-attempt scheduling
 
-## 7) Kafka schema evolution strategy
+Behavioral properties:
 
-The system uses **versioned JSON schema registry abstraction**:
+- bounded in-flight workers
+- bounded batch claim size
+- deterministic row ordering within processing batch
+- at-least-once delivery with consumer dedupe
 
-- `OrderCreatedEvent` includes `schemaVersion`
-- `VersionedJsonOrderCreatedEventSchemaRegistry` centralizes:
-  - serialization
-  - deserialization
-  - required-field validation
-  - backward compatibility (v1 payloads without `schemaVersion`)
-  - forward compatibility (unknown optional fields tolerated)
-- Validation failures emit schema metrics and reject invalid payloads before publish/process
+## 6. Kafka Consume and Dedupe Architecture
 
-Compatibility rules enforced:
+`OrderCreatedConsumer` provides:
 
-- Allowed: adding optional fields
-- Not allowed: removing required fields (`eventId`, `eventType`, `orderId`, `occurredAt`)
+- schema validation/deserialization
+- delayed processing enforcement window
+- transactional dedupe marker + state transition
+- retry topic routing for transient conditions
+- DLT handling with structured diagnostics
 
-## 8) Distributed Redis design
+`processed_events` table is the idempotent-consume anchor.
 
-### Cache
+## 7. Redis Usage Model
 
-- `RedisCacheProvider` uses JSON serialization
-- TTL strategy:
-  - order by id = 5 min
-  - order list = 1 min
-- Fail-safe behavior: cache failures log and fallback to DB path
-- Stampede protection retained in `OrderQueryService` with key locks
-- Circuit breaker disables cache calls during repeated Redis failure windows
-- TTL jitter reduces synchronized expiry spikes
+### Query cache
+
+- adapter: `RedisCacheProvider`
+- cache-aside read strategy
+- soft-fail fallback to DB
+- local circuit-breaker behavior during repeated Redis faults
+- TTL jitter for synchronized-expiry reduction
 
 ### Rate limiting
 
-- `RateLimitingFilter` uses Redis Lua token bucket for atomic updates
-- Key format: `userId:path:ip`
-- Works across multiple service instances
-- Atomic operation prevents races under concurrency
-- Fail-open strategy keeps API available during Redis outages
-- HA-ready config supports Redis Cluster or Sentinel setup
+- filter: `RateLimitingFilter`
+- token bucket in Lua for atomic refill/consume
+- distributed key scope (`user:path:ip`)
+- fail-open during Redis degradation to preserve availability
 
-## 9) Multi-region and disaster recovery architecture
+## 8. Security Model
 
-Core controls added:
+- resource server JWT validation
+- role claim conversion to Spring authorities
+- endpoint-level access controls in `SecurityConfig`
+- normalized API error envelope with correlation id
 
-- `RegionalFailoverManager` for dependency health checks (DB, Redis, Kafka)
-- health-triggered node-state transitions for active-passive strategy
-- `OrderService` write gating when region is passive
-- `GlobalIdempotencyService` to reduce duplicate creates during regional failover/retry races
-- `MultiRegionHealthIndicator` for actuator visibility
-- `region_id` propagation in request context/logs/metrics
+## 9. Failure Matrix
 
-RTO/RPO are explicit config values:
-
-- `app.multi-region.failover.rto-seconds`
-- `app.multi-region.failover.rpo-seconds`
-
-## 10) Security architecture
-
-- JWT stateless auth
-- `roles` claim -> `ROLE_*` authorities
-- Endpoint-level RBAC in `SecurityConfig`
-- Request correlation (`request_id`) and API error normalization
-
-## 11) Real-world failure case walkthroughs
-
-### Case A: Kafka publish outage during order creation
-
-- Order DB save succeeds
-- Outbox row remains `PENDING`
-- OutboxPublisher retries until Kafka healthy
-- No event lost; no transaction rollback needed
-
-### Case B: Duplicate Kafka message delivery
-
-- Consumer checks processed-event table first
-- Duplicate message is skipped and acked
-- No duplicate state transition
-
-### Case C: Redis unavailable
-
-- Cache get/put/evict logs warning and degrades gracefully
-- Read path falls back to DB and continues serving
-- Rate limiter fails open to preserve API availability
-
-### Case D: Concurrent status updates
-
-- Stale version update hits optimistic locking mismatch
-- Service returns `409 CONFLICT`
-- No lost update in DB
-
-### Case E: Consumer rebalance during processing
-
-- Rebalance lifecycle logs are emitted
-- Manual ack only after successful processing
-- Unacked records can be reassigned/retried safely
-
-### Case F: Regional dependency degradation
-
-- Regional health monitor detects repeated DB/Redis/Kafka failures
-- Node shifts to passive mode for active-passive deployments
-- Write APIs reject requests until health stabilizes
-- Prevents unsafe split-brain writes
-
-## 12) Architecture-level failure matrix
-
-| Failure | Protection | Result |
+| Failure mode | Defensive mechanism | Observable outcome |
 |---|---|---|
-| DB save fails in create | transaction rollback | no order, no outbox |
-| Kafka unavailable at publish time | outbox retry/backoff | eventual publish |
-| Duplicate Kafka record | processed-event dedupe | idempotent consume |
-| Redis cache failure | fail-safe cache provider | DB fallback |
-| Rate limiter Redis failure | fail-open + log | availability preserved |
-| Concurrent updates | optimistic lock + version check | conflict response |
-| Retry storm risk | bounded retry attempts + DLQ | no infinite loops |
-| Regional dependency failures | automatic passive mode switch | write safety over availability |
-| Schema-invalid event payload | schema validation reject + metric | bad event blocked early |
+| create transaction fails | transactional rollback | no order, no outbox row |
+| broker unavailable | outbox retries/backoff | pending/failed backlog grows then drains |
+| duplicate Kafka delivery | processed-event dedupe | idempotent consume, no repeated transition |
+| Redis cache failure | fail-soft cache adapter | DB fallback, increased cache error metrics |
+| rate limiter Redis failure | fail-open policy | API remains available |
+| stale concurrent write | optimistic locking | conflict response |
+| prolonged dependency outage | active/passive failover | writes rejected in passive region |
 

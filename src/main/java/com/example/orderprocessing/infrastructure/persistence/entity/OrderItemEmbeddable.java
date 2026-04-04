@@ -4,8 +4,10 @@ import jakarta.persistence.Embeddable;
 
 @Embeddable
 /**
- * OrderItemEmbeddable implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Embedded persistence value object for order line items.
+ *
+ * <p>Used inside {@link OrderEntity} so item rows are stored with the aggregate while keeping
+ * domain item mapping concerns outside JPA annotations.</p>
  */
 public class OrderItemEmbeddable {
 

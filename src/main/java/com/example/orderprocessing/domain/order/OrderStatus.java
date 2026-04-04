@@ -1,8 +1,10 @@
 package com.example.orderprocessing.domain.order;
 
 /**
- * OrderStatus enum enumerates constrained values used by the workflow.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Canonical domain lifecycle states for an order aggregate.
+ *
+ * <p>Used by the state pattern and external representations to reason about allowed
+ * transitions and business progression.</p>
  */
 public enum OrderStatus {
     PENDING,

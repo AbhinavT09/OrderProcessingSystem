@@ -1,31 +1,32 @@
-# Order Processing System - Project Documentation
+# Order Processing System Documentation
 
-This documentation reflects the **current implementation** of the project, including outbox publishing, Redis-backed caching/rate-limiting, Kafka schema evolution controls, and multi-region resilience scaffolding.
+This documentation describes the current implementation after architecture/package refactors, idempotency lifecycle hardening, and test expansion.
 
-## System capabilities
+## Quick Start
 
-- Hexagonal architecture with CQRS (`OrderService` write side, `OrderQueryService` read side)
-- Domain aggregate with State Pattern (`Order` + `OrderState` hierarchy)
-- Transactional Outbox pattern for reliable event publishing
-- Kafka delayed processing with retry topics + DLQ
-- Redis-backed distributed cache (JSON serialization + TTLs)
-- Redis-backed distributed token-bucket rate limiting (Lua + atomic updates)
-- Redis HA-ready configuration (cluster/sentinel, reconnect, pooling, timeout)
-- Kafka versioned event schema validation (`schemaVersion`) with compatibility handling
-- Multi-region failover manager with health-driven write gating
-- Global idempotency guard for cross-region duplicate prevention
-- JWT auth + RBAC + validation + structured API errors
-- Prometheus metrics + tracing + structured JSON logs
+- Build: `mvn clean compile`
+- Run: `mvn spring-boot:run`
+- Tests: `mvn test`
+- App package root: `src/main/java/com/example/orderprocessing`
 
-## Interactive architecture diagrams
+## Implementation Snapshot
 
-### Full runtime flow
+- **Architecture:** Hexagonal + CQRS + DDD aggregate/state pattern
+- **Write correctness:** idempotency (`IN_PROGRESS`/`COMPLETED`), optimistic locking, outbox
+- **Async reliability:** partitioned outbox workers, retry/backoff, Kafka consumer retries + DLT
+- **Read performance:** cache-aside query service + stampede coalescing + Redis circuit-breaker
+- **Resilience:** active/passive regional write gating + dependency health checks
+- **Security:** JWT resource server + role-based route authorization + normalized API errors
+- **Observability:** Micrometer metrics, structured logs, tracing hooks
+
+## Architecture Diagrams
+
+### End-to-end Runtime View
 
 ```mermaid
 flowchart LR
     Client[API Client] --> SEC[Security Chain]
     SEC --> API[interfaces/http/controller/OrderController]
-
     API --> WS[application/service/OrderService]
     API --> QS[application/service/OrderQueryService]
 
@@ -37,15 +38,17 @@ flowchart LR
     OUT --> OUTJPA[infrastructure/persistence/adapter/JpaOutboxRepository]
     OUTJPA --> ODB[(outbox_events)]
 
-    subgraph Async Outbox Publish
-      PUB[infrastructure/messaging/OutboxPublisher] --> ODB
-      PUB --> KEP[infrastructure/messaging/producer/KafkaEventPublisher]
+    subgraph Outbox Publish Pipeline
+      PUB[infrastructure/messaging/OutboxPublisher] --> FCH[infrastructure/messaging/OutboxFetcher]
+      FCH --> ODB
+      PUB --> PROC[infrastructure/messaging/OutboxProcessor]
+      PROC --> RET[infrastructure/messaging/OutboxRetryHandler]
+      PROC --> KEP[infrastructure/messaging/producer/KafkaEventPublisher]
       KEP --> SR[infrastructure/messaging/schema/VersionedJsonOrderCreatedEventSchemaRegistry]
       KEP --> K[(Kafka order.events)]
     end
 
     K --> KC[infrastructure/messaging/consumer/OrderCreatedConsumer]
-    KC --> SR
     KC --> PR[(ProcessedEventRepository Port)]
     PR --> PRJPA[infrastructure/persistence/adapter/JpaProcessedEventRepository]
     PRJPA --> PDB[(processed_events)]
@@ -54,130 +57,73 @@ flowchart LR
     QS --> CP[(CacheProvider Port)]
     CP --> RCP[infrastructure/cache/RedisCacheProvider]
     RCP --> REDIS[(Redis)]
-    RCP --> CB[Redis Circuit Breaker]
 
     SEC --> RL[infrastructure/web/RateLimitingFilter]
     SEC --> RC[infrastructure/web/RequestContextFilter]
-    SEC --> JWT[config/security/SecurityConfig + RoleClaimJwtAuthenticationConverter]
+    SEC --> JWT[config/security/SecurityConfig]
 
-    RC --> RMDC[region_id in logs and metrics]
     WS --> GID[infrastructure/crosscutting/GlobalIdempotencyService]
     WS --> RFM[infrastructure/resilience/RegionalFailoverManager]
-    RFM --> HC[infrastructure/resilience/MultiRegionHealthIndicator]
 ```
 
-### State transition model
+### Order State Lifecycle
 
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING
-    PENDING --> PROCESSING: delayed event OR update status
-    PENDING --> SHIPPED: update status
-    PENDING --> DELIVERED: update status
-    PENDING --> CANCELLED: cancel
-
+    PENDING --> PROCESSING
+    PENDING --> SHIPPED
+    PENDING --> DELIVERED
+    PENDING --> CANCELLED
     PROCESSING --> SHIPPED
     PROCESSING --> DELIVERED
     SHIPPED --> DELIVERED
-
     DELIVERED --> [*]
     CANCELLED --> [*]
 ```
 
-### Outbox reliability sequence
+### Idempotent Create Lifecycle
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Client
-    participant OS as application/service/OrderService
+    participant OS as OrderService
+    participant G as GlobalIdempotencyService
     participant DB as Orders DB
-    participant ODB as Outbox DB
-    participant OP as infrastructure/messaging/OutboxPublisher
-    participant K as Kafka
+    participant O as Outbox DB
 
-    C->>OS: create order
-    OS->>DB: save OrderEntity
-    OS->>ODB: save OutboxEntity(PENDING)
-    OS-->>C: 201 Created
-
-    loop scheduler poll
-      OP->>ODB: fetch PENDING/FAILED
-      OP->>K: publish event
-      alt publish success
-        OP->>ODB: mark SENT
-      else publish fails
-        OP->>ODB: retry_count++, mark FAILED
-      end
+    C->>OS: POST /orders + X-Idempotency-Key
+    OS->>G: resolveState(key)
+    alt COMPLETED
+      OS-->>C: return existing order
+    else IN_PROGRESS
+      OS-->>C: conflict/retryable response
+    else ABSENT
+      OS->>G: markInProgress(key)
+      OS->>DB: save order
+      OS->>O: save outbox row
+      OS-->>C: 201 Created
+      OS->>G: afterCommit markCompleted(key, orderId)
     end
 ```
 
-### Multi-region failover control flow
+## Documentation Structure
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant HM as infrastructure/resilience/RegionalFailoverManager
-    participant DB as Database
-    participant R as Redis
-    participant K as Kafka
-    participant OS as application/service/OrderService
-
-    loop every poll interval
-      HM->>DB: health check
-      HM->>R: health check
-      HM->>K: health check
-      alt dependency unhealthy threshold reached
-        HM->>HM: switch node state ACTIVE -> PASSIVE
-      else healthy
-        HM->>HM: keep/restore ACTIVE
-      end
-    end
-
-    OS->>HM: allowsWrites()
-    alt PASSIVE
-      OS-->>OS: throw InfrastructureException (503)
-    else ACTIVE
-      OS-->>OS: continue write
-    end
-```
-
-### Kafka schema evolution flow
-
-```mermaid
-flowchart TD
-    E[application/event/OrderCreatedEvent] --> V{schemaVersion present?}
-    V -- no --> D[Default to v1 parse rules]
-    V -- yes --> C[Validate supported/forward-compatible version]
-    D --> S[Validate required fields]
-    C --> S
-    S --> P[infrastructure/messaging/producer + outbox publish]
-    S --> Q[infrastructure/messaging/consumer deserialize + process]
-    S --> M[kafka.event.version.distribution]
-    S -->|invalid payload| ERR[kafka.schema.validation.errors++]
-```
-
-## Documentation map
+### Core Guides
 
 - [Design and Architecture](./design-and-architecture.md)
-- [Components and Tooling Rationale](./components-and-tooling.md)
-- [Observability, Logging, Monitoring](./observability-and-operations.md)
-- [Use Cases and Failure Cases](./use-cases-and-failure-scenarios.md)
-- [Folder and Class Reference (Overview)](./folder-and-class-reference.md)
-- [Reference Documentation (Nested)](./reference/index.md)
-- [Testing and Quality Strategy](./testing-and-quality.md)
+- [Components and Tooling](./components-and-tooling.md)
+- [Observability and Operations](./observability-and-operations.md)
+- [Testing and Quality](./testing-and-quality.md)
+- [Use Cases and Failure Scenarios](./use-cases-and-failure-scenarios.md)
 
-## Runtime prerequisites
+### Layered Reference
 
-- Java 17
-- Maven 3.9+
-- Redis (cache + distributed rate limiting)
-- Kafka broker
-- Optional OTEL collector (`http://localhost:4318/v1/traces`)
-
-## Run
-
-```bash
-mvn clean compile
-mvn spring-boot:run
-```
+- [Reference Index](./reference/index.md)
+- [Interface HTTP Layer](./reference/api-layer.md)
+- [Application Layer](./reference/application-layer.md)
+- [Domain Layer](./reference/domain-layer.md)
+- [Infrastructure Layer](./reference/infrastructure-layer.md)
+- [Configuration and Runtime](./reference/configuration-and-runtime.md)
+- [Folder and Class Reference](./folder-and-class-reference.md)

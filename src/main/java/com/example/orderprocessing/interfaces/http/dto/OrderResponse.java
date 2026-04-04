@@ -6,8 +6,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * OrderResponse record captures immutable data transferred between layers.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * HTTP response model for order resources.
+ *
+ * <p>Exposes a client-facing projection of aggregate identity, status, timestamp, and items.</p>
  */
 public record OrderResponse(UUID id, OrderStatus status, Instant createdAt, List<OrderItemRequest> items) {
 }

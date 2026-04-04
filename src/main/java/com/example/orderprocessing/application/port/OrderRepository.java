@@ -7,37 +7,44 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * OrderRepository interface defines a stable boundary used by collaborating components.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Application port for order persistence operations.
+ *
+ * <p>Decouples application/domain services from concrete storage technology while exposing
+ * query capabilities needed by command and read services.</p>
  */
 public interface OrderRepository {
     /**
-     * Performs save.
-     * @param order input argument used by this operation
-     * @return operation result
+     * Persists an order snapshot.
+     *
+     * @param order entity representation of current aggregate state
+     * @return persisted entity (including generated/updated persistence fields)
      */
     OrderEntity save(OrderEntity order);
     /**
-     * Performs findById.
-     * @param id input argument used by this operation
-     * @return operation result
+     * Loads an order by identifier.
+     *
+     * @param id order identifier
+     * @return matching entity when present
      */
     Optional<OrderEntity> findById(UUID id);
     /**
-     * Performs findAll.
-     * @return operation result
+     * Lists all persisted orders.
+     *
+     * @return all order entities
      */
     List<OrderEntity> findAll();
     /**
-     * Performs findByStatus.
-     * @param status input argument used by this operation
-     * @return operation result
+     * Lists orders by status.
+     *
+     * @param status status filter
+     * @return entities matching requested status
      */
     List<OrderEntity> findByStatus(OrderStatus status);
     /**
-     * Performs findByIdempotencyKey.
-     * @param idempotencyKey input argument used by this operation
-     * @return operation result
+     * Resolves order previously created for an idempotency key.
+     *
+     * @param idempotencyKey external request idempotency key
+     * @return matching order when key has a stored mapping
      */
     Optional<OrderEntity> findByIdempotencyKey(String idempotencyKey);
 }

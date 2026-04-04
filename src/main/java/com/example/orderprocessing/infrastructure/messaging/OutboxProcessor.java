@@ -20,8 +20,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Component
 /**
- * OutboxProcessor implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure component that publishes claimed outbox rows.
+ *
+ * <p>Parses payloads, invokes asynchronous event publisher, and transitions rows to SENT or retry
+ * states. This component is part of the reliable outbox delivery pipeline.</p>
  */
 public class OutboxProcessor {
 
@@ -60,8 +62,11 @@ public class OutboxProcessor {
     }
 
     /**
-     * Executes processBatch.
-     * @param claimed input argument used by this operation
+     * Processes a claimed outbox batch.
+     *
+     * <p>Each row is handled independently to isolate failures and maximize forward progress.</p>
+     *
+     * @param claimed rows leased for the current processing window
      */
     public void processBatch(List<OutboxEntity> claimed) {
         for (OutboxEntity event : claimed) {

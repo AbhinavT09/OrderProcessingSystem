@@ -5,8 +5,9 @@ import jakarta.validation.constraints.NotEmpty;
 import java.util.List;
 
 /**
- * CreateOrderRequest record captures immutable data transferred between layers.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * HTTP command payload for order creation.
+ *
+ * <p>Interface-layer DTO validated at the API boundary before entering application services.</p>
  */
 public record CreateOrderRequest(@NotEmpty @Valid List<OrderItemRequest> items) {
 }

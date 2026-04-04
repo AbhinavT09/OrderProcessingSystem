@@ -1,4 +1,4 @@
-package com.example.orderprocessing.domain.model;
+package com.example.orderprocessing.domain.order;
 
 import com.example.orderprocessing.application.exception.ConflictException;
 import java.time.Instant;

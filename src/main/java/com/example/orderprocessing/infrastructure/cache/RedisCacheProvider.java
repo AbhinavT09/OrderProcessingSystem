@@ -19,8 +19,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 @Component
 /**
- * RedisCacheProvider implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure cache adapter backed by Redis.
+ *
+ * <p>Implements cache-aside primitives used by query services and protects callers with a
+ * local circuit-breaker strategy when Redis becomes unreliable.</p>
  */
 public class RedisCacheProvider implements CacheProvider {
 
@@ -73,10 +75,14 @@ public class RedisCacheProvider implements CacheProvider {
 
     @Override
     /**
-     * Returns  value.
-     * @param key input argument used by this operation
-     * @param type input argument used by this operation
-     * @return operation result
+     * Reads a cached value by key and attempts typed deserialization.
+     *
+     * <p>On Redis or parsing failures this method fails soft (cache miss semantics), allowing
+     * callers to fall back to primary storage without request failure.</p>
+     *
+     * @param key cache key
+     * @param type expected value type
+     * @return cached value when available and valid; empty otherwise
      */
     public <T> Optional<T> get(String key, Class<T> type) {
         if (isCircuitOpen()) {
@@ -110,9 +116,10 @@ public class RedisCacheProvider implements CacheProvider {
 
     @Override
     /**
-     * Executes put.
-     * @param key input argument used by this operation
-     * @param value input argument used by this operation
+     * Writes a cache entry without explicit TTL override.
+     *
+     * @param key cache key
+     * @param value serializable value
      */
     public void put(String key, Object value) {
         put(key, value, null);
@@ -120,10 +127,13 @@ public class RedisCacheProvider implements CacheProvider {
 
     @Override
     /**
-     * Executes put.
-     * @param key input argument used by this operation
-     * @param value input argument used by this operation
-     * @param ttl input argument used by this operation
+     * Writes a cache entry with optional TTL and jitter.
+     *
+     * <p>TTL jitter spreads expiration times to reduce synchronized cache stampedes.</p>
+     *
+     * @param key cache key
+     * @param value serializable value
+     * @param ttl desired time-to-live; null/invalid values imply non-expiring write
      */
     public void put(String key, Object value, Duration ttl) {
         if (isCircuitOpen()) {
@@ -153,8 +163,9 @@ public class RedisCacheProvider implements CacheProvider {
 
     @Override
     /**
-     * Executes evict.
-     * @param key input argument used by this operation
+     * Evicts a cache key.
+     *
+     * @param key cache key to remove
      */
     public void evict(String key) {
         if (isCircuitOpen()) {

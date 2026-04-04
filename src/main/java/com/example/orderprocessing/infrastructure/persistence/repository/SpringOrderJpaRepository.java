@@ -8,20 +8,24 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
- * SpringOrderJpaRepository interface defines a stable boundary used by collaborating components.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Spring Data repository for primary order table access.
+ *
+ * <p>Provides query shapes required by application ports while relying on JPA for transaction
+ * participation and optimistic-lock support.</p>
  */
 public interface SpringOrderJpaRepository extends JpaRepository<OrderEntity, UUID> {
     /**
-     * Performs findByStatusOrderByCreatedAtAsc.
-     * @param status input argument used by this operation
-     * @return operation result
+     * Retrieves orders in a status sorted by creation timestamp.
+     *
+     * @param status status filter
+     * @return ordered matching orders
      */
     List<OrderEntity> findByStatusOrderByCreatedAtAsc(OrderStatus status);
     /**
-     * Performs findByIdempotencyKey.
-     * @param idempotencyKey input argument used by this operation
-     * @return operation result
+     * Finds an order by persisted idempotency key.
+     *
+     * @param idempotencyKey idempotency key captured at create time
+     * @return matching order when present
      */
     Optional<OrderEntity> findByIdempotencyKey(String idempotencyKey);
 }

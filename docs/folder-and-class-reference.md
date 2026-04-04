@@ -1,6 +1,14 @@
-# Folder and Class Reference (Overview)
+# Folder and Class Reference
 
-The detailed implementation reference has been split into nested documents for easier maintenance and navigation.
+## Source Layout
+
+- `src/main/java/com/example/orderprocessing/interfaces/http`
+- `src/main/java/com/example/orderprocessing/application`
+- `src/main/java/com/example/orderprocessing/domain/order`
+- `src/main/java/com/example/orderprocessing/infrastructure`
+- `src/main/java/com/example/orderprocessing/config`
+
+## Documentation Entry Points
 
 - [Reference Index](./reference/index.md)
 - [Interface HTTP Layer](./reference/api-layer.md)
@@ -9,4 +17,10 @@ The detailed implementation reference has been split into nested documents for e
 - [Infrastructure Layer](./reference/infrastructure-layer.md)
 - [Configuration and Runtime Controls](./reference/configuration-and-runtime.md)
 
-Use this overview page as the entry point for class/package-level details.
+## Quick Responsibility Map
+
+- **Interfaces**: endpoint contracts, request binding, error translation
+- **Application**: use-case orchestration, transactions, port boundaries
+- **Domain**: lifecycle invariants and state transitions
+- **Infrastructure**: adapters (DB/Kafka/Redis/security/resilience)
+- **Config**: runtime wiring and dependency-client setup

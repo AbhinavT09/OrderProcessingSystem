@@ -9,6 +9,12 @@ Each use case has:
 
 ---
 
+## Cross-cutting assumptions
+
+- API examples are representative and may omit auth headers for brevity.
+- Error envelopes follow `ApiError` (`code`, `message`, `requestId`, `timestamp`).
+- Async event timing can vary based on retry/backoff configuration.
+
 ## Use Case 1: Create Order (Idempotent Write)
 
 ### Positive case
@@ -42,12 +48,11 @@ Example response:
 {
   "id": "6a84f0a9-6ae9-49f8-9538-c5bb6cb4ac3d",
   "status": "PENDING",
+  "createdAt": "2026-04-04T12:10:15Z",
   "items": [
     {"productName": "USB-C Cable", "quantity": 2, "price": 9.99},
     {"productName": "Power Adapter", "quantity": 1, "price": 19.99}
-  ],
-  "createdAt": "2026-04-04T12:10:15Z",
-  "version": 0
+  ]
 }
 ```
 
@@ -61,6 +66,7 @@ Expected behavior:
 
 - If already completed, existing order is returned (no duplicate row).
 - If in-flight lock exists, request fails with conflict message.
+- If no key is provided, request proceeds without cross-request idempotency reuse.
 
 Example conflict response:
 
@@ -94,7 +100,7 @@ Outbox row payload example:
 Expected behavior:
 
 1. `OutboxPublisher` claims rows with partition-aware `FOR UPDATE SKIP LOCKED`.
-2. `VersionedJsonOrderCreatedEventSchemaRegistry` validates payload.
+2. `VersionedJsonOrderCreatedEventSchemaRegistry` validates payload contract.
 3. `KafkaEventPublisher` publishes with key `orderId`.
 4. Row is marked `SENT`.
 
@@ -110,6 +116,7 @@ Expected behavior:
 - `retryCount` increments.
 - `nextAttemptAt` uses exponential backoff.
 - No event loss because data remains in DB.
+- Once Kafka recovers, publisher resumes and row transitions to `SENT`.
 
 ---
 
@@ -237,6 +244,7 @@ Expected behavior:
 1. `RegionalFailoverManager` changes node state to `passive`.
 2. `failover.events.count++`.
 3. Write APIs return service unavailable to prevent split-brain writes.
+4. Read APIs remain available.
 
 Example response:
 
@@ -289,6 +297,6 @@ Expected behavior:
 ## Conflict Resolution and Consistency Notes
 
 - Cross-region writes are designed with **eventual consistency** assumptions.
-- Conflict resolution strategy is configurable (`app.multi-region.consistency.conflict-resolution`), default `last-write-wins`.
+- Conflict resolution strategy is configurable for deployments with cross-region overlap policies.
 - Idempotency and optimistic locking together minimize duplicate effects and stale-write corruption.
 

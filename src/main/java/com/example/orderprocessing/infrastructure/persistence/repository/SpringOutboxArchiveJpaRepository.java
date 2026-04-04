@@ -5,8 +5,9 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
- * SpringOutboxArchiveJpaRepository interface defines a stable boundary used by collaborating components.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Spring Data repository for archived outbox rows.
+ *
+ * <p>Persists historical delivery records after they are removed from the active outbox table.</p>
  */
 public interface SpringOutboxArchiveJpaRepository extends JpaRepository<OutboxArchiveEntity, UUID> {
 }
