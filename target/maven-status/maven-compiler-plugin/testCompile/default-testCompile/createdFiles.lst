@@ -1,3 +1,0 @@
-com/example/orderprocessing/infrastructure/messaging/OutboxDispatcherTest$FailingPublisher.class
-com/example/orderprocessing/infrastructure/messaging/OutboxDispatcherTest.class
-com/example/orderprocessing/infrastructure/messaging/OutboxDispatcherTest$FakeOutboxRepository.class
