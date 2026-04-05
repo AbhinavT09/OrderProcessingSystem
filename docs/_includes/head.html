@@ -49,7 +49,14 @@
       initThemeToggle();
     })();
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" defer></script>
+  <script src="{{ '/assets/js/mermaid.min.js' | relative_url }}"></script>
+  <script>
+    if (!window.mermaid) {
+      const fallbackScript = document.createElement("script");
+      fallbackScript.src = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
+      document.head.appendChild(fallbackScript);
+    }
+  </script>
   <script>
     document.addEventListener("DOMContentLoaded", function () {
       if (!window.mermaid) return;
