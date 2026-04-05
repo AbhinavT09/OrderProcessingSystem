@@ -77,6 +77,11 @@ Client -> Interface HTTP -> Application Services -> Domain Aggregate/State
 
 Detailed architecture and diagrams: [docs/index.md](./docs/index.md)
 
+## GitHub Pages Documentation
+
+- Live docs URL: [https://abhinavt09.github.io/OrderProcessingSystem/](https://abhinavt09.github.io/OrderProcessingSystem/)
+- If Pages is not yet active, enable it in **Settings -> Pages** with **Source = GitHub Actions**.
+
 ## Technology Stack
 
 - **Language/Runtime**: Java 17
