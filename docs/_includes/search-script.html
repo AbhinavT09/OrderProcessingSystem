@@ -13,6 +13,8 @@
       index = lunr(function () {
         this.ref("url");
         this.field("title", { boost: 10 });
+        this.field("keywords", { boost: 6 });
+        this.field("excerpt", { boost: 4 });
         this.field("content");
         docs.forEach((d) => this.add(d));
       });
@@ -36,7 +38,7 @@
       resultsEl.innerHTML = hits
         .map((h) => docs.find((d) => d.url === h.ref))
         .filter(Boolean)
-        .map((d) => `<a class="search-result-item" href="${d.url}"><div class="search-result-title">${d.title}</div></a>`)
+        .map((d) => `<a class="search-result-item" href="${d.url}"><div class="search-result-title">${d.title}</div><div class="search-result-excerpt">${d.excerpt || ""}</div></a>`)
         .join("");
     }
 

@@ -2,12 +2,19 @@
 layout: null
 ---
 [
-{% assign searchable = site.pages | where_exp: "p", "p.title and p.url and p.url != '/search.json'" %}
-{% for p in searchable %}
-  {
-    "title": {{ p.title | jsonify }},
-    "url": {{ p.url | relative_url | jsonify }},
-    "content": {{ p.content | strip_html | strip_newlines | replace: "  ", " " | jsonify }}
-  }{% unless forloop.last %},{% endunless %}
+{% assign first = true %}
+{% for p in site.pages %}
+  {% if p.url != "/search.json" and p.title %}
+    {% unless first %},{% endunless %}
+    {
+      "title": {{ p.title | jsonify }},
+      "url": {{ p.url | relative_url | jsonify }},
+      "content": {{ p.content | strip_html | strip_newlines | jsonify }},
+      "excerpt": {{ p.excerpt | default: p.description | default: p.title | strip_html | strip_newlines | jsonify }},
+      "section_type": {{ p.search_section_type | default: "main" | jsonify }},
+      "keywords": {{ p.search_keywords | default: p.title | strip_html | strip_newlines | jsonify }}
+    }
+    {% assign first = false %}
+  {% endif %}
 {% endfor %}
 ]
