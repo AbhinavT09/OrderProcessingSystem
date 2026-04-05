@@ -5,6 +5,8 @@ import com.example.orderprocessing.application.port.OrderRepository;
 import com.example.orderprocessing.domain.order.OrderStatus;
 import com.example.orderprocessing.infrastructure.crosscutting.GlobalIdempotencyService;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
+import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
+import com.example.orderprocessing.infrastructure.resilience.RegionalConsistencyManager;
 import com.example.orderprocessing.interfaces.http.dto.CreateOrderRequest;
 import com.example.orderprocessing.interfaces.http.dto.OrderItemRequest;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -130,15 +132,19 @@ class OrderServiceIdempotencyLifecycleTest {
         CacheProvider cacheProvider = new NoOpCacheProvider();
         OutboxService outbox = mock(OutboxService.class);
         OrderMapper mapper = new OrderMapper();
-        var failover = mock(com.example.orderprocessing.infrastructure.resilience.RegionalFailoverManager.class);
-        when(failover.allowsWrites()).thenReturn(true);
+        RegionalConsistencyManager regionalConsistencyManager = mock(RegionalConsistencyManager.class);
+        BackpressureManager backpressureManager = mock(BackpressureManager.class);
+        when(regionalConsistencyManager.allowsWrites()).thenReturn(true);
+        when(regionalConsistencyManager.regionId()).thenReturn("region-a");
+        when(backpressureManager.shouldRejectWrites()).thenReturn(false);
         return new OrderService(
                 repository,
                 cacheProvider,
                 outbox,
                 mapper,
                 idempotency,
-                failover,
+                regionalConsistencyManager,
+                backpressureManager,
                 new SimpleMeterRegistry());
     }
 

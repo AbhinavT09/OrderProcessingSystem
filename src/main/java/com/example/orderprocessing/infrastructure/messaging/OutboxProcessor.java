@@ -105,6 +105,8 @@ public class OutboxProcessor {
             outboxLagSummary.record(Math.max(0, Duration.between(outboxEvent.getCreatedAt(), Instant.now()).toMillis()));
             outboxEvent.setStatus(OutboxStatus.SENT);
             outboxEvent.setNextAttemptAt(Instant.now());
+            outboxEvent.setFailureType(null);
+            outboxEvent.setLastFailureReason(null);
             outboxRepository.save(outboxEvent);
         });
     }

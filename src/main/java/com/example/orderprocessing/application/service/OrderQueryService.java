@@ -58,7 +58,7 @@ public class OrderQueryService {
         this.orderListTtl = Duration.ofSeconds(orderListTtlSeconds);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
     /**
      * Retrieves a single order projection, preferring cache when available.
      *
@@ -86,7 +86,7 @@ public class OrderQueryService {
         });
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
     /**
      * Retrieves list of orders optionally filtered by status.
      *

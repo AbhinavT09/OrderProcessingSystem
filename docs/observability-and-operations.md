@@ -45,6 +45,17 @@ Structured logging fields include:
 
 - `rate_limit.allowed.count`
 - `rate_limit.blocked.count`
+- `rate_limit.dynamic.adjustments`
+- `rate_limit.rejections.by.policy`
+
+### Adaptive retry and backpressure metrics
+
+- `retry.delay.ms`
+- `retry.classification.count` (`TRANSIENT`, `SEMI_TRANSIENT`, `PERMANENT`)
+- `backpressure.level`
+- `backpressure.outbox.backlog`
+- `backpressure.kafka.lag.ms`
+- `backpressure.db.saturation.percent`
 
 ### Outbox metrics
 
@@ -70,6 +81,8 @@ Structured logging fields include:
 
 - `failover.events.count`
 - `region.health.unhealthy.count`
+- `region.health.dependency.failure.count`
+- `region.conflict.rejected.count`
 
 ## 3. Tracing
 
@@ -87,7 +100,7 @@ Use traces + request_id for end-to-end debugging.
 - Scheduler dispatches owned partitions with in-flight semaphore backpressure.
 - Fetcher claims rows in transaction, records `outbox.batch.size`, and preserves deterministic aggregate ordering.
 - Processor performs async publish, tracks publish latency/rate/lag, and marks `SENT` on completion.
-- Retry handler updates retry count, computes exponential delay with cap, and parks terminal failures when max retries are exhausted.
+- Retry handler updates retry count, classifies failure type, computes adaptive delay (retry count + system pressure + jitter + cap), and parks terminal/permanent failures.
 - Kafka publisher is async and single-attempt; retry/backoff policy is intentionally owned by outbox to keep retry control deterministic.
 - Cleanup archives/deletes old `SENT` rows on retention schedule.
 
@@ -97,8 +110,22 @@ Use traces + request_id for end-to-end debugging.
 - Dedupe check + domain update + processed marker insertion executed in transaction template boundary.
 - Retry topics with exponential backoff and max attempts; DLT handler logs payload context and headers.
 - Versioned schema parsing with fallback compatibility logic.
+- `read_committed` consumption prevents seeing aborted transactional producer records.
+- Kafka lag measurements feed `BackpressureManager` for global admission/throttling decisions.
 
-## 5. Operational Alerts and Interpretation
+## 5.1 Feedback Loops and Signal Propagation
+
+```mermaid
+flowchart LR
+    KAFKA_LAG[kafka.consumer.lag.ms] --> BPM[BackpressureManager]
+    OUTBOX[outbox.pending.count + outbox.failure.count] --> BPM
+    DBSAT[DB pool saturation] --> BPM
+    BPM --> WRITES[OrderService write admission]
+    BPM --> RLP[RateLimitPolicyProvider adaptive policy]
+    BPM --> RETRY[AdaptiveRetryPolicyStrategy]
+```
+
+## 6. Operational Alerts and Interpretation
 
 ### High outbox backlog
 
@@ -118,7 +145,7 @@ Use traces + request_id for end-to-end debugging.
 - Likely causes: malformed payloads, persistent downstream dependency issues
 - Actions: inspect DLT payload contexts, classify and replay only safe records
 
-## 6. DLQ Operations Guidance
+## 7. DLQ Operations Guidance
 
 When `kafka.consumer.dlq.count` rises:
 
@@ -130,7 +157,7 @@ When `kafka.consumer.dlq.count` rises:
 3. Decide replay/ignore policy.
 4. Apply fix and replay if safe.
 
-## 7. Real-world Monitoring Scenarios
+## 8. Real-world Monitoring Scenarios
 
 ### Scenario: Kafka outage
 
@@ -163,6 +190,7 @@ Action:
 Symptoms:
 
 - rising `rate_limit.blocked.count`
+- rising `rate_limit.dynamic.adjustments` during pressure events
 
 Action:
 
@@ -197,7 +225,20 @@ Action:
 2. Confirm global traffic router moved writes to healthy region.
 3. Track recovery and verify node returns active state.
 
-## 8. Runbook Checkpoints
+### Scenario: active-active conflict suppression
+
+Symptoms:
+
+- rising `region.conflict.rejected.count`
+- elevated concurrent writes from multiple regions
+
+Action:
+
+1. verify conflict policy mode (`last-write-wins` vs `version-based`)
+2. inspect conflicting event/order timestamps and versions
+3. ensure upstream routing consistency for hot aggregates
+
+## 9. Runbook Checkpoints
 
 - Verify Kafka connectivity and topic health.
 - Verify Redis availability and latency.

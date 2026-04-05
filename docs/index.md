@@ -1,6 +1,6 @@
 # Order Processing System Documentation
 
-This documentation describes the current implementation after architecture/package refactors, idempotency lifecycle hardening, and test expansion.
+This documentation describes the current implementation after adaptive retry, dynamic rate limiting, active-active consistency controls, transactional Kafka publishing, and system-wide backpressure propagation.
 
 ## Quick Start
 
@@ -13,9 +13,9 @@ This documentation describes the current implementation after architecture/packa
 
 - **Architecture:** Hexagonal + CQRS + DDD aggregate/state pattern
 - **Write correctness:** idempotency (`IN_PROGRESS`/`COMPLETED`), optimistic locking, outbox
-- **Async reliability:** partitioned outbox workers, retry/backoff, Kafka consumer retries + DLT
+- **Async reliability:** partitioned outbox workers, adaptive retry classification, Kafka consumer retries + DLT
 - **Read performance:** cache-aside query service + stampede coalescing + Redis circuit-breaker
-- **Resilience:** active/passive regional write gating + dependency health checks
+- **Resilience:** active/passive failover + active-active consistency conflict checks + system-wide backpressure
 - **Security:** JWT resource server + role-based route authorization + normalized API errors
 - **Observability:** Micrometer metrics, structured logs, tracing hooks
 
@@ -63,7 +63,16 @@ flowchart LR
     SEC --> JWT[config/security/SecurityConfig]
 
     WS --> GID[infrastructure/crosscutting/GlobalIdempotencyService]
-    WS --> RFM[infrastructure/resilience/RegionalFailoverManager]
+    WS --> RCM[infrastructure/resilience/RegionalConsistencyManager]
+    WS --> BPM[infrastructure/resilience/BackpressureManager]
+    RL --> RPP[infrastructure/web/ratelimit/RedisBackedRateLimitPolicyProvider]
+    RPP --> REDIS
+    RPP --> BPM
+    KC --> BPM
+    PROC --> RPS[infrastructure/messaging/retry/RetryPolicyStrategy]
+    KC --> RPS
+    RCM --> RFM[infrastructure/resilience/RegionalFailoverManager]
+    RCM --> CRS[infrastructure/resilience/conflict/ConflictResolutionStrategy]
 ```
 
 ### Order State Lifecycle
@@ -106,6 +115,69 @@ sequenceDiagram
       OS-->>C: 201 Created
       OS->>G: afterCommit markCompleted(key, orderId)
     end
+```
+
+### Adaptive Outbox Retry Lifecycle
+
+```mermaid
+flowchart TD
+    PF[Publish Failure] --> RP[RetryPolicyStrategy.plan]
+    RP --> CLS{Classification}
+    CLS -->|TRANSIENT| TD1[Short adaptive delay]
+    CLS -->|SEMI_TRANSIENT| TD2[Medium adaptive delay]
+    CLS -->|PERMANENT| TD3[Terminalize row]
+    TD1 --> BP1[Scale delay by BackpressureManager]
+    TD2 --> BP2[Scale delay by BackpressureManager]
+    BP1 --> JT1[Apply jitter + max cap]
+    BP2 --> JT2[Apply jitter + max cap]
+    JT1 --> NXT1[Set nextAttemptAt]
+    JT2 --> NXT2[Set nextAttemptAt]
+    TD3 --> NXT3[Park as terminal FAILED]
+    NXT1 --> OBS1[Emit retry.delay.ms]
+    NXT2 --> OBS2[Emit retry.delay.ms]
+    NXT3 --> OBS3[Emit retry.classification.count]
+```
+
+### Dynamic Rate Limiting Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant Filter as RateLimitingFilter
+    participant Provider as RedisBackedRateLimitPolicyProvider
+    participant Redis
+    participant BP as BackpressureManager
+
+    Client->>Filter: HTTP request
+    Filter->>Provider: resolve(request)
+    Provider->>Redis: policy config read (cached)
+    Provider->>BP: throttlingFactor()
+    Provider-->>Filter: RateLimitPolicy(capacity, burst, window)
+    Filter->>Redis: token bucket Lua
+    alt token bucket success
+        Filter-->>Client: allow or 429
+    else script failure and fallback enabled
+        Filter->>Redis: sliding window Lua
+        Filter-->>Client: allow or 429
+    else Redis unavailable
+        Filter-->>Client: fail-open allow
+    end
+```
+
+### Global Backpressure Propagation
+
+```mermaid
+flowchart LR
+    KC[Kafka Consumer lag recorder] --> BPM[BackpressureManager]
+    ODB[(outbox_events backlog)] --> BPM
+    DBP[(DB pool utilization)] --> BPM
+    BPM --> LVL{Level}
+    LVL -->|NORMAL| N1[No throttling]
+    LVL -->|ELEVATED| N2[Tighten rate policies]
+    LVL -->|CRITICAL| N3[Reject write requests]
+    N2 --> RL[RateLimitingFilter]
+    N3 --> OS[OrderService write path]
 ```
 
 ## Documentation Structure

@@ -12,6 +12,8 @@ Infrastructure implements application ports and hosts all external-system integr
   - `repository`: Spring Data interfaces and custom queries
 - `infrastructure/messaging`
   - outbox orchestration and shared messaging exceptions/utilities
+- `infrastructure/messaging/retry`
+  - adaptive retry classification and delay strategies
 - `infrastructure/messaging/producer`
   - Kafka producer adapters
 - `infrastructure/messaging/consumer`
@@ -22,12 +24,14 @@ Infrastructure implements application ports and hosts all external-system integr
   - Redis-backed cache adapter with degrade-safe behavior
 - `infrastructure/web`
   - request context and distributed rate limiting filters
+- `infrastructure/web/ratelimit`
+  - dynamic rate-limit policy resolution and Redis-backed policy cache
 - `infrastructure/security`
   - JWT claim-to-authority conversion helpers
 - `infrastructure/crosscutting`
   - global idempotency state coordinator
 - `infrastructure/resilience`
-  - regional health management and health indicators
+  - regional health/failover, active-active conflict coordination, and backpressure management
 
 ## Messaging and Outbox
 
@@ -54,7 +58,8 @@ Infrastructure implements application ports and hosts all external-system integr
   - publish latency/rate/lag metrics
 - `OutboxRetryHandler`
   - retry count management
-  - bounded backoff and terminal handling
+  - adaptive classification (`TRANSIENT`, `SEMI_TRANSIENT`, `PERMANENT`)
+  - jittered bounded delay + failure reason persistence
 
 ### Outbox state model (`OutboxStatus`)
 
@@ -74,6 +79,7 @@ Infrastructure implements application ports and hosts all external-system integr
 - validates/serializes events through schema registry
 - preserves per-order key ordering via chained futures
 - applies circuit-breaker fail-fast behavior after repeated failures
+- sends with Kafka transactions (`executeInTransaction`) and idempotent producer settings
 - delegates retries to outbox retry policy
 
 #### Producer failure semantics
@@ -88,6 +94,9 @@ Infrastructure implements application ports and hosts all external-system integr
 - enforces delayed-processing window
 - executes dedupe + transition + marker write transactionally
 - uses retry-topic and DLT for failure containment
+- consumes with `read_committed` isolation
+- feeds lag telemetry into backpressure manager
+- applies regional conflict checks before state mutation
 
 #### Consumer idempotency and safety
 
@@ -103,6 +112,22 @@ Infrastructure implements application ports and hosts all external-system integr
 - threshold-based ACTIVE/PASSIVE switching
 - recovery threshold before returning to ACTIVE
 - write gating hook consumed by application write service
+
+### `RegionalConsistencyManager`
+
+- wraps failover write-gating with region-aware consistency decisions
+- delegates conflict decisions to `ConflictResolutionStrategy`
+- emits rejected conflict telemetry
+
+### `BackpressureManager`
+
+- derives pressure level from:
+  - Kafka lag (from consumer)
+  - outbox backlog (`PENDING` + `FAILED`)
+  - DB saturation
+- exports level/inputs as gauges
+- exposes adaptive throttling factor for rate limits
+- exposes critical-pressure write rejection signal for command path
 
 #### Health check strategy
 
@@ -142,8 +167,10 @@ Infrastructure implements application ports and hosts all external-system integr
   - durable order snapshot
   - optimistic lock version
   - idempotency key persistence
+  - region metadata (`regionId`, `lastUpdatedTimestamp`) for active-active safety
 - `OutboxEntity`
   - active outbox row including retry and scheduling metadata
+  - failure metadata (`failureType`, `lastFailureReason`) for adaptive retries
   - lifecycle hooks initialize defaults and timestamps
 - `OutboxArchiveEntity`
   - immutable historical copy of sent events
@@ -174,8 +201,50 @@ Infrastructure implements application ports and hosts all external-system integr
 ## Web and Security Infrastructure
 
 - `RequestContextFilter`: request and region context propagation into MDC/response/metrics
-- `RateLimitingFilter`: distributed Redis token bucket with fail-open policy
+- `RateLimitingFilter`: dynamic policy-driven token bucket with sliding-window fallback and adaptive throttling
+- `RateLimitPolicyProvider` / `RedisBackedRateLimitPolicyProvider`: user-tier/endpoint/load policy resolution
 - `RoleClaimJwtAuthenticationConverter`: JWT role claim to authority mapping
+
+## Detailed Runtime Flows
+
+### Adaptive retry decision path
+
+```mermaid
+flowchart TD
+    HF[Outbox/Consumer failure] --> STRAT[AdaptiveRetryPolicyStrategy]
+    STRAT --> FC[Classify failure type]
+    FC --> C1[TRANSIENT]
+    FC --> C2[SEMI_TRANSIENT]
+    FC --> C3[PERMANENT]
+    C1 --> D1[Compute delay using retries + load]
+    C2 --> D2[Compute delay using retries + load]
+    C3 --> T[Terminal fail path]
+    D1 --> J1[Apply jitter + max cap]
+    D2 --> J2[Apply jitter + max cap]
+    J1 --> P1[Persist nextAttemptAt]
+    J2 --> P2[Persist nextAttemptAt]
+    T --> P3[Persist parked FAILED]
+```
+
+### Active-active conflict guard
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Service as OrderService/Consumer
+    participant RCM as RegionalConsistencyManager
+    participant CRS as ConflictResolutionStrategy
+    participant Repo as OrderRepository
+
+    Service->>Repo: load current order state
+    Service->>RCM: shouldApplyIncomingUpdate(...)
+    RCM->>CRS: evaluate(current, incomingRegion, incomingTs, incomingVersion)
+    alt accepted
+        Service->>Repo: save update with regionId + lastUpdatedTimestamp
+    else rejected
+        RCM-->>Service: reject stale/conflicting update
+    end
+```
 
 ## Key Metrics by Infrastructure Area
 
@@ -188,7 +257,13 @@ Infrastructure implements application ports and hosts all external-system integr
 - **Cache/Redis**
   - `cache.hit.count`, `cache.miss.count`, `cache.error.count`, `cache.degraded.mode.count`, `redis.connection.failures`
 - **Rate limiting**
-  - `rate_limit.allowed.count`, `rate_limit.blocked.count`
+  - `rate_limit.allowed.count`, `rate_limit.blocked.count`, `rate_limit.dynamic.adjustments`, `rate_limit.rejections.by.policy`
+- **Adaptive retry**
+  - `retry.delay.ms`, `retry.classification.count`
+- **Backpressure**
+  - `backpressure.level`, `backpressure.outbox.backlog`, `backpressure.kafka.lag.ms`, `backpressure.db.saturation.percent`
+- **Regional consistency**
+  - `region.conflict.rejected.count`
 - **Regional failover**
   - `failover.events.count`, `region.health.unhealthy.count`, `region.health.dependency.failure.count`
 

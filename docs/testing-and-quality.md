@@ -33,12 +33,14 @@
 - `OutboxPublisherTest`
 - `KafkaEventPublisherTest`
 - `OrderCreatedConsumerUnitTest`
+- `OutboxRetryHandlerTest`
 
 Coverage focus:
 
 - async publish result handling
-- retry transitions and status updates
+- retry transitions, adaptive classification, and scheduling metadata
 - consumer dedupe and delayed processing behavior
+- transactional Kafka publish path and circuit-open behavior
 
 ### Infrastructure/resilience
 
@@ -49,7 +51,7 @@ Coverage focus:
 Coverage focus:
 
 - cache hit/miss/degraded behavior
-- limiter allow/block/fail-open
+- limiter allow/block with dynamic policy input and fail-open fallback
 - active/passive switching and write gating signals
 
 ### API integration
@@ -59,20 +61,35 @@ Coverage focus:
   - idempotency behavior at HTTP boundary
   - validation and error contract behavior
 
-## 3. Test Design Standards
+## 3. Critical Test Flows
+
+```mermaid
+flowchart TD
+    A[OutboxRetryHandlerTest] --> A1[Transient classification schedules nextAttemptAt]
+    A --> A2[Permanent classification terminalizes row]
+    B[KafkaEventPublisherTest] --> B1[Transactional publish success]
+    B --> B2[Circuit opens after repeated transaction failures]
+    C[RateLimitingFilterTest] --> C1[Token bucket allow path]
+    C --> C2[429 block path]
+    D[OrderCreatedConsumerUnitTest] --> D1[Dedupe marker + state promotion]
+```
+
+## 4. Test Design Standards
 
 - deterministic and independent test execution
 - meaningful assertions on business outcomes, not implementation details
 - minimal over-mocking of core orchestration logic
 - integration tests for cross-component critical paths
 
-## 4. Residual Gaps / Next Expansion
+## 5. Residual Gaps / Next Expansion
 
 - embedded Kafka end-to-end verification (outbox -> producer -> consumer)
 - explicit no-event-loss crash-injection integration around outbox loop
 - deterministic active-recovery-to-active integration with controlled dependency health
+- conflict resolution strategy permutations under concurrent active-active writes
+- backpressure-level transitions driving write admission and dynamic throttling
 
-## 5. Quality Gates
+## 6. Quality Gates
 
 - `mvn clean compile` must pass
 - targeted reliability suites should pass before broad runs

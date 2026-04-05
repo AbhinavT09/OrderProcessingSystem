@@ -59,6 +59,12 @@ public class OutboxEntity {
     @Column(nullable = false)
     private Instant updatedAt;
 
+    @Column(length = 32)
+    private String failureType;
+
+    @Column(length = 256)
+    private String lastFailureReason;
+
     @PrePersist
     /**
      * Initializes defaults before first insert.
@@ -271,5 +277,21 @@ public class OutboxEntity {
      */
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getFailureType() {
+        return failureType;
+    }
+
+    public void setFailureType(String failureType) {
+        this.failureType = failureType;
+    }
+
+    public String getLastFailureReason() {
+        return lastFailureReason;
+    }
+
+    public void setLastFailureReason(String lastFailureReason) {
+        this.lastFailureReason = lastFailureReason;
     }
 }

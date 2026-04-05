@@ -7,9 +7,12 @@ import com.example.orderprocessing.application.service.OrderMapper;
 import com.example.orderprocessing.domain.order.Order;
 import com.example.orderprocessing.infrastructure.messaging.DelayedProcessingNotReadyException;
 import com.example.orderprocessing.infrastructure.messaging.RetryableProcessingException;
+import com.example.orderprocessing.infrastructure.messaging.retry.RetryPolicyStrategy;
 import com.example.orderprocessing.infrastructure.messaging.schema.OrderCreatedEventSchemaRegistry;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import com.example.orderprocessing.infrastructure.persistence.entity.ProcessedEventEntity;
+import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
+import com.example.orderprocessing.infrastructure.resilience.RegionalConsistencyManager;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -53,6 +56,9 @@ public class OrderCreatedConsumer {
     private final Counter dlqCounter;
     private final DistributionSummary kafkaLagMsSummary;
     private final TransactionTemplate transactionTemplate;
+    private final BackpressureManager backpressureManager;
+    private final RegionalConsistencyManager regionalConsistencyManager;
+    private final RetryPolicyStrategy retryPolicyStrategy;
 
     /**
      * Creates the order-created Kafka consumer.
@@ -66,7 +72,10 @@ public class OrderCreatedConsumer {
                                 ProcessedEventRepository processedEventRepository,
                                 OrderMapper orderMapper,
                                 MeterRegistry meterRegistry,
-                                TransactionTemplate transactionTemplate) {
+                                TransactionTemplate transactionTemplate,
+                                BackpressureManager backpressureManager,
+                                RegionalConsistencyManager regionalConsistencyManager,
+                                RetryPolicyStrategy retryPolicyStrategy) {
         this.schemaRegistry = schemaRegistry;
         this.orderRepository = orderRepository;
         this.processedEventRepository = processedEventRepository;
@@ -79,6 +88,9 @@ public class OrderCreatedConsumer {
         this.kafkaLagMsSummary = DistributionSummary.builder("kafka.consumer.lag.ms")
                 .publishPercentiles(0.95, 0.99)
                 .register(meterRegistry);
+        this.backpressureManager = backpressureManager;
+        this.regionalConsistencyManager = regionalConsistencyManager;
+        this.retryPolicyStrategy = retryPolicyStrategy;
     }
 
     @RetryableTopic(
@@ -94,7 +106,10 @@ public class OrderCreatedConsumer {
             },
             dltStrategy = DltStrategy.FAIL_ON_ERROR
     )
-    @KafkaListener(topics = "${app.kafka.order-events-topic:order.events}", groupId = "${app.kafka.consumer-group:order-processing-group}")
+    @KafkaListener(
+            topics = "${app.kafka.order-events-topic:order.events}",
+            groupId = "${app.kafka.consumer-group:order-processing-group}",
+            properties = {"isolation.level=read_committed"})
     /**
      * Processes one Kafka record with retry-aware, idempotent semantics.
      *
@@ -112,7 +127,9 @@ public class OrderCreatedConsumer {
         try {
             OrderCreatedEvent event = parse(payload);
             Instant occurredAt = Instant.parse(event.occurredAt());
-            kafkaLagMsSummary.record(Math.max(0, Instant.now().toEpochMilli() - occurredAt.toEpochMilli()));
+            long lagMs = Math.max(0, Instant.now().toEpochMilli() - occurredAt.toEpochMilli());
+            kafkaLagMsSummary.record(lagMs);
+            backpressureManager.recordKafkaLagMs(lagMs);
             if (Instant.now().isBefore(occurredAt.plus(5, ChronoUnit.MINUTES))) {
                 throw new DelayedProcessingNotReadyException(
                         "OrderCreated event is not ready for processing yet: " + event.eventId());
@@ -129,14 +146,17 @@ public class OrderCreatedConsumer {
             }
             consumeErrorCounter.increment();
             retryCounter.increment();
+            applyAdaptiveDelay(ex);
             throw new RetryableProcessingException("Data integrity violation while processing event", ex);
         } catch (DataAccessException ex) {
             consumeErrorCounter.increment();
             retryCounter.increment();
+            applyAdaptiveDelay(ex);
             throw new RetryableProcessingException("Transient DB failure while processing event", ex);
         } catch (DelayedProcessingNotReadyException | RetryableProcessingException ex) {
             consumeErrorCounter.increment();
             retryCounter.increment();
+            applyAdaptiveDelay(ex);
             throw ex;
         } catch (RuntimeException ex) {
             consumeErrorCounter.increment();
@@ -200,8 +220,20 @@ public class OrderCreatedConsumer {
             }
 
             Order order = orderMapper.toDomain(entity.get());
+            if (!regionalConsistencyManager.shouldApplyIncomingUpdate(
+                    entity.get(),
+                    entity.get().getRegionId(),
+                    Instant.parse(event.occurredAt()),
+                    entity.get().getVersion())) {
+                log.warn("Skipping stale regional update for orderId={} eventId={}", event.orderId(), event.eventId());
+                persistProcessed(event);
+                return;
+            }
             if (order.promotePendingToProcessing()) {
-                orderRepository.save(orderMapper.toEntity(order));
+                OrderEntity toSave = orderMapper.toEntity(order);
+                toSave.setRegionId(entity.get().getRegionId());
+                toSave.setLastUpdatedTimestamp(Instant.now());
+                orderRepository.save(toSave);
                 log.info("Processed OrderCreated event; order promoted to PROCESSING orderId={} eventId={}",
                         event.orderId(), event.eventId());
             } else {
@@ -228,5 +260,18 @@ public class OrderCreatedConsumer {
         return normalized.contains("uk_processed_event_id")
                 || (normalized.contains("processed_events") && normalized.contains("eventid"))
                 || normalized.contains("duplicate") && normalized.contains("eventid");
+    }
+
+    private void applyAdaptiveDelay(Throwable throwable) {
+        RetryPolicyStrategy.RetryPlan plan = retryPolicyStrategy.plan(throwable, 1);
+        long sleepMs = Math.min(5000L, Math.max(0L, plan.delayMs()));
+        if (sleepMs == 0) {
+            return;
+        }
+        try {
+            Thread.sleep(sleepMs);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

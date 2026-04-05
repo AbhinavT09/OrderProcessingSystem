@@ -1,5 +1,8 @@
 package com.example.orderprocessing.infrastructure.web;
 
+import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
+import com.example.orderprocessing.infrastructure.web.ratelimit.RateLimitPolicy;
+import com.example.orderprocessing.infrastructure.web.ratelimit.RateLimitPolicyProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.FilterChain;
@@ -14,6 +17,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
 class RateLimitingFilterTest {
@@ -21,9 +25,19 @@ class RateLimitingFilterTest {
     @Test
     void allowsRequestWhenTokenBucketAllows() throws Exception {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        RateLimitPolicyProvider provider = mock(RateLimitPolicyProvider.class);
+        BackpressureManager backpressureManager = mock(BackpressureManager.class);
         doReturn(1L).when(redis).execute(any(), anyList(), any(), any(), any(), any(), any());
+        when(provider.resolve(any())).thenReturn(new RateLimitPolicy(2, 60_000, 1, true, "test"));
+        when(backpressureManager.level()).thenReturn(BackpressureManager.Level.NORMAL);
         RateLimitingFilter filter = new RateLimitingFilter(
-                redis, new ObjectMapper().findAndRegisterModules(), new SimpleMeterRegistry(), 2, 60_000);
+                redis,
+                new ObjectMapper().findAndRegisterModules(),
+                provider,
+                backpressureManager,
+                new SimpleMeterRegistry(),
+                2,
+                60_000);
 
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/orders");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -36,9 +50,19 @@ class RateLimitingFilterTest {
     @Test
     void blocksRequestWith429WhenTokenBucketRejects() throws Exception {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        RateLimitPolicyProvider provider = mock(RateLimitPolicyProvider.class);
+        BackpressureManager backpressureManager = mock(BackpressureManager.class);
         doReturn(0L).when(redis).execute(any(), anyList(), any(), any(), any(), any(), any());
+        when(provider.resolve(any())).thenReturn(new RateLimitPolicy(1, 60_000, 0, true, "test"));
+        when(backpressureManager.level()).thenReturn(BackpressureManager.Level.NORMAL);
         RateLimitingFilter filter = new RateLimitingFilter(
-                redis, new ObjectMapper().findAndRegisterModules(), new SimpleMeterRegistry(), 1, 60_000);
+                redis,
+                new ObjectMapper().findAndRegisterModules(),
+                provider,
+                backpressureManager,
+                new SimpleMeterRegistry(),
+                1,
+                60_000);
 
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/orders");
         MockHttpServletResponse response = new MockHttpServletResponse();

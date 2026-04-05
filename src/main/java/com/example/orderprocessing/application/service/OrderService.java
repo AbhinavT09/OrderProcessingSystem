@@ -12,7 +12,8 @@ import com.example.orderprocessing.domain.order.Order;
 import com.example.orderprocessing.domain.order.OrderStatus;
 import com.example.orderprocessing.infrastructure.crosscutting.GlobalIdempotencyService;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
-import com.example.orderprocessing.infrastructure.resilience.RegionalFailoverManager;
+import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
+import com.example.orderprocessing.infrastructure.resilience.RegionalConsistencyManager;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -50,7 +51,8 @@ public class OrderService {
     private final OutboxService outboxService;
     private final OrderMapper mapper;
     private final GlobalIdempotencyService globalIdempotencyService;
-    private final RegionalFailoverManager failoverManager;
+    private final RegionalConsistencyManager regionalConsistencyManager;
+    private final BackpressureManager backpressureManager;
     private final Counter createCounter;
     private final Counter requestCounter;
     private final Counter idempotentHitCounter;
@@ -72,14 +74,16 @@ public class OrderService {
                         OutboxService outboxService,
                         OrderMapper mapper,
                         GlobalIdempotencyService globalIdempotencyService,
-                        RegionalFailoverManager failoverManager,
+                        RegionalConsistencyManager regionalConsistencyManager,
+                        BackpressureManager backpressureManager,
                         MeterRegistry meterRegistry) {
         this.orderRepository = orderRepository;
         this.cacheProvider = cacheProvider;
         this.outboxService = outboxService;
         this.mapper = mapper;
         this.globalIdempotencyService = globalIdempotencyService;
-        this.failoverManager = failoverManager;
+        this.regionalConsistencyManager = regionalConsistencyManager;
+        this.backpressureManager = backpressureManager;
         this.requestCounter = meterRegistry.counter("orders.service.request.count");
         this.createCounter = meterRegistry.counter("orders.created.count");
         this.idempotentHitCounter = meterRegistry.counter("orders.idempotency.hit.count");
@@ -87,7 +91,7 @@ public class OrderService {
         this.operationTimer = meterRegistry.timer("orders.operation.duration");
     }
 
-    @Transactional
+    @Transactional(transactionManager = "transactionManager")
     /**
      * Creates an order while enforcing request-level idempotency semantics.
      *
@@ -160,7 +164,9 @@ public class OrderService {
             Order order = Order.create(mapper.toDomainItems(request.items()), normalizedIdempotencyKey);
 
             try {
-                OrderEntity saved = orderRepository.save(mapper.toEntity(order));
+                OrderEntity toSave = mapper.toEntity(order);
+                stampRegionMetadata(toSave, null);
+                OrderEntity saved = orderRepository.save(toSave);
                 MDC.put("order_id", saved.getId().toString());
 
                 OrderCreatedEvent createdEvent = new OrderCreatedEvent(
@@ -194,7 +200,7 @@ public class OrderService {
         });
     }
 
-    @Transactional
+    @Transactional(transactionManager = "transactionManager")
     /**
      * Updates order status with optimistic-concurrency protection.
      *
@@ -221,7 +227,9 @@ public class OrderService {
                     OrderStatus previous = order.getStatus();
                     order.updateStatus(status);
                     try {
-                        OrderEntity saved = orderRepository.save(mapper.toEntity(order));
+                        OrderEntity toSave = mapper.toEntity(order);
+                        stampRegionMetadata(toSave, entity);
+                        OrderEntity saved = orderRepository.save(toSave);
                         invalidateOrderCaches(saved.getId());
                         log.info("Order status updated orderId={} from={} to={} version={}",
                                 id, previous, status, saved.getVersion());
@@ -240,7 +248,7 @@ public class OrderService {
         });
     }
 
-    @Transactional
+    @Transactional(transactionManager = "transactionManager")
     /**
      * Cancels an order when domain invariants allow cancellation.
      *
@@ -259,10 +267,20 @@ public class OrderService {
                 int attempts = 0;
                 while (attempts < 2) {
                     attempts++;
-                    Order order = mapper.toDomain(findEntity(id));
+                    OrderEntity existing = findEntity(id);
+                    Order order = mapper.toDomain(existing);
+                    if (!regionalConsistencyManager.shouldApplyIncomingUpdate(
+                            existing,
+                            regionalConsistencyManager.regionId(),
+                            Instant.now(),
+                            existing.getVersion())) {
+                        throw new ConflictException("Order update rejected due to regional conflict");
+                    }
                     order.cancel();
                     try {
-                        OrderEntity saved = orderRepository.save(mapper.toEntity(order));
+                        OrderEntity toSave = mapper.toEntity(order);
+                        stampRegionMetadata(toSave, existing);
+                        OrderEntity saved = orderRepository.save(toSave);
                         invalidateOrderCaches(saved.getId());
                         log.info("Order cancelled orderId={} version={}", id, saved.getVersion());
                         return mapper.toResponse(mapper.toDomain(saved));
@@ -314,9 +332,20 @@ public class OrderService {
     }
 
     private void assertWriteAllowed() {
-        if (!failoverManager.allowsWrites()) {
+        if (!regionalConsistencyManager.allowsWrites()) {
             throw new InfrastructureException("Region in passive mode; writes are temporarily disabled", null);
         }
+        if (backpressureManager.shouldRejectWrites()) {
+            throw new InfrastructureException("Write path is throttled due to system backpressure", null);
+        }
+    }
+
+    private void stampRegionMetadata(OrderEntity target, OrderEntity previous) {
+        target.setRegionId(regionalConsistencyManager.regionId());
+        if (previous != null && previous.getVersion() != null && target.getVersion() == null) {
+            target.setVersion(previous.getVersion());
+        }
+        target.setLastUpdatedTimestamp(Instant.now());
     }
 
     private void markGlobalIdempotencyCompletedAfterCommit(String idempotencyKey, UUID orderId) {

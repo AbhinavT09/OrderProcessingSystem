@@ -29,6 +29,16 @@ spring:
           max-wait: ${REDIS_POOL_MAX_WAIT:2s}
   kafka:
     bootstrap-servers: localhost:9092
+    producer:
+      transaction-id-prefix: ${KAFKA_TRANSACTION_ID_PREFIX:order-processing-tx-}
+      properties:
+        enable.idempotence: true
+        acks: all
+        max.in.flight.requests.per.connection: 5
+        retries: 2147483647
+    consumer:
+      properties:
+        isolation.level: read_committed
     listener:
       ack-mode: manual_immediate
 
@@ -82,6 +92,8 @@ app:
   outbox:
     max-retries: 12
     backoff-base-ms: 1000
+    backoff-max-ms: 300000
+    backoff-jitter-percent: 0.2
     partition:
       total: 64
       instance-id: ${OUTBOX_INSTANCE_ID:0}
@@ -100,6 +112,18 @@ app:
     rate-limit:
       requests: 120
       window-ms: 60000
+      policy-cache-ttl-ms: 10000
+  backpressure:
+    poll-ms: 5000
+    outbox:
+      elevated-backlog: 2000
+      critical-backlog: 10000
+    kafka:
+      elevated-lag-ms: 120000
+      critical-lag-ms: 600000
+    db:
+      elevated-utilization: 0.75
+      critical-utilization: 0.90
   kafka:
     order-events-topic: order.events
     consumer-group: order-processing-group

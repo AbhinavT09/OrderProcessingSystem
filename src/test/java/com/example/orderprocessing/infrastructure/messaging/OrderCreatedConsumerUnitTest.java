@@ -5,9 +5,13 @@ import com.example.orderprocessing.application.port.ProcessedEventRepository;
 import com.example.orderprocessing.application.service.OrderMapper;
 import com.example.orderprocessing.domain.order.OrderStatus;
 import com.example.orderprocessing.infrastructure.messaging.consumer.OrderCreatedConsumer;
+import com.example.orderprocessing.infrastructure.messaging.retry.RetryClassification;
+import com.example.orderprocessing.infrastructure.messaging.retry.RetryPolicyStrategy;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderItemEmbeddable;
 import com.example.orderprocessing.infrastructure.persistence.entity.ProcessedEventEntity;
+import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
+import com.example.orderprocessing.infrastructure.resilience.RegionalConsistencyManager;
 import com.example.orderprocessing.infrastructure.messaging.schema.VersionedJsonOrderCreatedEventSchemaRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -28,6 +32,10 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class OrderCreatedConsumerUnitTest {
 
@@ -39,6 +47,13 @@ class OrderCreatedConsumerUnitTest {
 
         InMemoryProcessedEventRepository processedRepository = new InMemoryProcessedEventRepository();
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        BackpressureManager backpressureManager = mock(BackpressureManager.class);
+        RegionalConsistencyManager regionalConsistencyManager = mock(RegionalConsistencyManager.class);
+        RetryPolicyStrategy retryPolicyStrategy = mock(RetryPolicyStrategy.class);
+        when(regionalConsistencyManager.shouldApplyIncomingUpdate(any(), any(), any(), any())).thenReturn(true);
+        when(retryPolicyStrategy.plan(any(), anyInt()))
+                .thenReturn(new RetryPolicyStrategy.RetryPlan(
+                        RetryClassification.TRANSIENT, 1L, "SYSTEM", "test"));
         OrderCreatedConsumer consumer = new OrderCreatedConsumer(
                 new VersionedJsonOrderCreatedEventSchemaRegistry(
                         new ObjectMapper(),
@@ -47,7 +62,10 @@ class OrderCreatedConsumerUnitTest {
                 processedRepository,
                 new OrderMapper(),
                 meterRegistry,
-                new TransactionTemplate(new NoopTransactionManager()));
+                new TransactionTemplate(new NoopTransactionManager()),
+                backpressureManager,
+                regionalConsistencyManager,
+                retryPolicyStrategy);
 
         String payload = """
                 {
@@ -71,6 +89,8 @@ class OrderCreatedConsumerUnitTest {
         entity.setStatus(status);
         entity.setCreatedAt(Instant.now().minus(10, ChronoUnit.MINUTES));
         entity.setVersion(0L);
+        entity.setRegionId("region-a");
+        entity.setLastUpdatedTimestamp(Instant.now().minus(10, ChronoUnit.MINUTES));
 
         OrderItemEmbeddable item = new OrderItemEmbeddable();
         item.setProductName("Item");

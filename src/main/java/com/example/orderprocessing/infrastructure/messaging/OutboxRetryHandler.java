@@ -1,9 +1,11 @@
 package com.example.orderprocessing.infrastructure.messaging;
 
 import com.example.orderprocessing.application.port.OutboxRepository;
+import com.example.orderprocessing.infrastructure.messaging.retry.RetryPolicyStrategy;
 import com.example.orderprocessing.infrastructure.persistence.entity.OutboxEntity;
 import com.example.orderprocessing.infrastructure.persistence.entity.OutboxStatus;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -25,8 +27,12 @@ public class OutboxRetryHandler {
     private final OutboxRepository outboxRepository;
     private final TransactionTemplate transactionTemplate;
     private final Counter retryCounter;
+    private final Counter transientCounter;
+    private final Counter semiTransientCounter;
+    private final Counter permanentCounter;
+    private final DistributionSummary retryDelaySummary;
     private final int maxRetries;
-    private final long backoffBaseMs;
+    private final RetryPolicyStrategy retryPolicyStrategy;
 
     /**
      * Creates retry handling for failed outbox events.
@@ -38,13 +44,17 @@ public class OutboxRetryHandler {
     public OutboxRetryHandler(OutboxRepository outboxRepository,
                               TransactionTemplate transactionTemplate,
                               MeterRegistry meterRegistry,
-                              @Value("${app.outbox.max-retries:12}") int maxRetries,
-                              @Value("${app.outbox.backoff-base-ms:1000}") long backoffBaseMs) {
+                              RetryPolicyStrategy retryPolicyStrategy,
+                              @Value("${app.outbox.max-retries:12}") int maxRetries) {
         this.outboxRepository = outboxRepository;
         this.transactionTemplate = transactionTemplate;
         this.retryCounter = meterRegistry.counter("outbox.retry.count");
+        this.transientCounter = meterRegistry.counter("retry.classification.count", "classification", "TRANSIENT");
+        this.semiTransientCounter = meterRegistry.counter("retry.classification.count", "classification", "SEMI_TRANSIENT");
+        this.permanentCounter = meterRegistry.counter("retry.classification.count", "classification", "PERMANENT");
+        this.retryDelaySummary = DistributionSummary.builder("retry.delay.ms").register(meterRegistry);
         this.maxRetries = maxRetries;
-        this.backoffBaseMs = backoffBaseMs;
+        this.retryPolicyStrategy = retryPolicyStrategy;
     }
 
     /**
@@ -58,8 +68,12 @@ public class OutboxRetryHandler {
             retries++;
             outboxEvent.setRetryCount(retries);
             retryCounter.increment();
+            RetryPolicyStrategy.RetryPlan retryPlan = retryPolicyStrategy.plan(throwable, retries);
+            outboxEvent.setFailureType(retryPlan.failureType());
+            outboxEvent.setLastFailureReason(retryPlan.failureReason());
+            incrementClassificationCounter(retryPlan.classification().name());
 
-            if (retries >= maxRetries) {
+            if (retries >= maxRetries || "PERMANENT".equals(retryPlan.classification().name())) {
                 outboxEvent.setStatus(OutboxStatus.FAILED);
                 outboxEvent.setNextAttemptAt(Instant.now().plus(3650, ChronoUnit.DAYS));
                 outboxRepository.save(outboxEvent);
@@ -68,7 +82,8 @@ public class OutboxRetryHandler {
                 return;
             }
 
-            long delayMs = computeBackoffDelayMs(retries);
+            long delayMs = retryPlan.delayMs();
+            retryDelaySummary.record(delayMs);
             outboxEvent.setStatus(OutboxStatus.FAILED);
             outboxEvent.setNextAttemptAt(Instant.now().plusMillis(delayMs));
             outboxRepository.save(outboxEvent);
@@ -77,9 +92,15 @@ public class OutboxRetryHandler {
         });
     }
 
-    private long computeBackoffDelayMs(int retries) {
-        long exp = Math.max(0, retries - 1);
-        long delay = (long) (backoffBaseMs * Math.pow(2, exp));
-        return Math.min(delay, 300_000L);
+    private void incrementClassificationCounter(String classification) {
+        if ("TRANSIENT".equals(classification)) {
+            transientCounter.increment();
+            return;
+        }
+        if ("SEMI_TRANSIENT".equals(classification)) {
+            semiTransientCounter.increment();
+            return;
+        }
+        permanentCounter.increment();
     }
 }

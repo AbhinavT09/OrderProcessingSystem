@@ -104,7 +104,8 @@ public class KafkaEventPublisher implements EventPublisher {
                     "Kafka circuit breaker is OPEN", null));
         }
         CompletableFuture<Void> result = new CompletableFuture<>();
-        kafkaTemplate.send(topic, event.orderId(), payload).whenComplete((sendResult, ex) -> {
+        kafkaTemplate.executeInTransaction(ops -> ops.send(topic, event.orderId(), payload))
+                .whenComplete((sendResult, ex) -> {
             if (ex == null) {
                 consecutiveFailures.set(0);
                 log.debug("Kafka publish success orderId={} eventId={}", event.orderId(), event.eventId());

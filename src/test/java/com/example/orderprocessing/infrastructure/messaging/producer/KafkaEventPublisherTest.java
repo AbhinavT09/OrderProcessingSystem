@@ -24,7 +24,7 @@ class KafkaEventPublisherTest {
         when(schemaRegistry.serialize(any())).thenReturn("{\"event\":\"ok\"}");
         CompletableFuture<SendResult<String, String>> sendFuture = new CompletableFuture<>();
         sendFuture.complete(mock(SendResult.class));
-        when(template.send(any(String.class), any(String.class), any(String.class))).thenReturn(sendFuture);
+        when(template.executeInTransaction(any())).thenReturn(sendFuture);
 
         KafkaEventPublisher publisher = new KafkaEventPublisher(template, schemaRegistry, "order.events", 2, 30);
         CompletableFuture<Void> result = publisher.publishOrderCreated(
@@ -44,7 +44,7 @@ class KafkaEventPublisherTest {
         failed1.completeExceptionally(new RuntimeException("kafka down 1"));
         CompletableFuture<SendResult<String, String>> failed2 = new CompletableFuture<>();
         failed2.completeExceptionally(new RuntimeException("kafka down 2"));
-        when(template.send(any(String.class), any(String.class), any(String.class)))
+        when(template.executeInTransaction(any()))
                 .thenReturn(failed1)
                 .thenReturn(failed2);
 
