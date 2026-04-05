@@ -1,23 +1,20 @@
 package com.example.orderprocessing.infrastructure.messaging.consumer;
 
 import com.example.orderprocessing.application.event.OrderCreatedEvent;
+import com.example.orderprocessing.application.port.OrderRecord;
 import com.example.orderprocessing.application.port.OrderRepository;
 import com.example.orderprocessing.application.port.ProcessedEventRepository;
 import com.example.orderprocessing.application.service.OrderMapper;
 import com.example.orderprocessing.domain.order.Order;
 import com.example.orderprocessing.infrastructure.messaging.DelayedProcessingNotReadyException;
 import com.example.orderprocessing.infrastructure.messaging.RetryableProcessingException;
-import com.example.orderprocessing.infrastructure.messaging.retry.RetryPolicyStrategy;
 import com.example.orderprocessing.infrastructure.messaging.schema.OrderCreatedEventSchemaRegistry;
-import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
-import com.example.orderprocessing.infrastructure.persistence.entity.ProcessedEventEntity;
 import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
 import com.example.orderprocessing.infrastructure.resilience.RegionalConsistencyManager;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -33,6 +30,7 @@ import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.beans.factory.annotation.Value;
 
 @Component
 /**
@@ -41,6 +39,14 @@ import org.springframework.transaction.support.TransactionTemplate;
  * <p>Consumes Kafka messages, validates schema, and applies idempotent state progression to the
  * local order aggregate projection. Retries transient failures and routes terminal failures to DLQ
  * for operator investigation.</p>
+ *
+ * <p><b>Architecture role:</b> infrastructure adapter on the asynchronous read side.</p>
+ *
+ * <p><b>Idempotency:</b> checks and writes {@code processed_events} markers in the same DB
+ * transaction as aggregate mutation to tolerate at-least-once delivery.</p>
+ *
+ * <p><b>Transactional boundaries:</b> listener consumes with {@code read_committed}; business
+ * mutation and dedup marker are persisted inside a DB transaction template.</p>
  */
 public class OrderCreatedConsumer {
 
@@ -58,7 +64,7 @@ public class OrderCreatedConsumer {
     private final TransactionTemplate transactionTemplate;
     private final BackpressureManager backpressureManager;
     private final RegionalConsistencyManager regionalConsistencyManager;
-    private final RetryPolicyStrategy retryPolicyStrategy;
+    private final long processingDelayMs;
 
     /**
      * Creates the order-created Kafka consumer.
@@ -75,7 +81,7 @@ public class OrderCreatedConsumer {
                                 TransactionTemplate transactionTemplate,
                                 BackpressureManager backpressureManager,
                                 RegionalConsistencyManager regionalConsistencyManager,
-                                RetryPolicyStrategy retryPolicyStrategy) {
+                                @Value("${app.kafka.processing-delay-ms:300000}") long processingDelayMs) {
         this.schemaRegistry = schemaRegistry;
         this.orderRepository = orderRepository;
         this.processedEventRepository = processedEventRepository;
@@ -90,7 +96,7 @@ public class OrderCreatedConsumer {
                 .register(meterRegistry);
         this.backpressureManager = backpressureManager;
         this.regionalConsistencyManager = regionalConsistencyManager;
-        this.retryPolicyStrategy = retryPolicyStrategy;
+        this.processingDelayMs = Math.max(0L, processingDelayMs);
     }
 
     @RetryableTopic(
@@ -130,7 +136,7 @@ public class OrderCreatedConsumer {
             long lagMs = Math.max(0, Instant.now().toEpochMilli() - occurredAt.toEpochMilli());
             kafkaLagMsSummary.record(lagMs);
             backpressureManager.recordKafkaLagMs(lagMs);
-            if (Instant.now().isBefore(occurredAt.plus(5, ChronoUnit.MINUTES))) {
+            if (Instant.now().isBefore(occurredAt.plusMillis(processingDelayMs))) {
                 throw new DelayedProcessingNotReadyException(
                         "OrderCreated event is not ready for processing yet: " + event.eventId());
             }
@@ -146,17 +152,14 @@ public class OrderCreatedConsumer {
             }
             consumeErrorCounter.increment();
             retryCounter.increment();
-            applyAdaptiveDelay(ex);
             throw new RetryableProcessingException("Data integrity violation while processing event", ex);
         } catch (DataAccessException ex) {
             consumeErrorCounter.increment();
             retryCounter.increment();
-            applyAdaptiveDelay(ex);
             throw new RetryableProcessingException("Transient DB failure while processing event", ex);
         } catch (DelayedProcessingNotReadyException | RetryableProcessingException ex) {
             consumeErrorCounter.increment();
             retryCounter.increment();
-            applyAdaptiveDelay(ex);
             throw ex;
         } catch (RuntimeException ex) {
             consumeErrorCounter.increment();
@@ -198,11 +201,7 @@ public class OrderCreatedConsumer {
     }
 
     private void persistProcessed(OrderCreatedEvent event) {
-        ProcessedEventEntity processed = new ProcessedEventEntity();
-        processed.setEventId(event.eventId());
-        processed.setEventType(event.eventType());
-        processed.setProcessedAt(Instant.now());
-        processedEventRepository.save(processed);
+        processedEventRepository.save(event.eventId(), event.eventType(), Instant.now());
     }
 
     private void processEventInTransaction(OrderCreatedEvent event) {
@@ -212,7 +211,7 @@ public class OrderCreatedConsumer {
                 return;
             }
 
-            Optional<OrderEntity> entity = orderRepository.findById(UUID.fromString(event.orderId()));
+            Optional<OrderRecord> entity = orderRepository.findById(UUID.fromString(event.orderId()));
             if (entity.isEmpty()) {
                 log.warn("Order not found for consumed event eventId={} orderId={}", event.eventId(), event.orderId());
                 persistProcessed(event);
@@ -222,17 +221,15 @@ public class OrderCreatedConsumer {
             Order order = orderMapper.toDomain(entity.get());
             if (!regionalConsistencyManager.shouldApplyIncomingUpdate(
                     entity.get(),
-                    entity.get().getRegionId(),
+                    entity.get().regionId(),
                     Instant.parse(event.occurredAt()),
-                    entity.get().getVersion())) {
+                    entity.get().version())) {
                 log.warn("Skipping stale regional update for orderId={} eventId={}", event.orderId(), event.eventId());
                 persistProcessed(event);
                 return;
             }
             if (order.promotePendingToProcessing()) {
-                OrderEntity toSave = orderMapper.toEntity(order);
-                toSave.setRegionId(entity.get().getRegionId());
-                toSave.setLastUpdatedTimestamp(Instant.now());
+                OrderRecord toSave = orderMapper.toRecord(order, entity.get().regionId(), Instant.now());
                 orderRepository.save(toSave);
                 log.info("Processed OrderCreated event; order promoted to PROCESSING orderId={} eventId={}",
                         event.orderId(), event.eventId());
@@ -262,16 +259,4 @@ public class OrderCreatedConsumer {
                 || normalized.contains("duplicate") && normalized.contains("eventid");
     }
 
-    private void applyAdaptiveDelay(Throwable throwable) {
-        RetryPolicyStrategy.RetryPlan plan = retryPolicyStrategy.plan(throwable, 1);
-        long sleepMs = Math.min(5000L, Math.max(0L, plan.delayMs()));
-        if (sleepMs == 0) {
-            return;
-        }
-        try {
-            Thread.sleep(sleepMs);
-        } catch (InterruptedException interruptedException) {
-            Thread.currentThread().interrupt();
-        }
-    }
 }

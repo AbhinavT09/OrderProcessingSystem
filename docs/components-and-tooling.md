@@ -1,3 +1,8 @@
+---
+title: Components and Tooling
+nav_order: 3
+---
+
 # Components and Tooling
 
 ## 1. Component Boundaries

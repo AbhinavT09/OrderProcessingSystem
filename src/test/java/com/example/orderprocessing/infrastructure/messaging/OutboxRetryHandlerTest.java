@@ -19,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -30,7 +32,7 @@ class OutboxRetryHandlerTest {
     void handleFailurePersistsRetryMetadataAndSchedulesNextAttempt() {
         OutboxRepository repository = mock(OutboxRepository.class);
         RetryPolicyStrategy retryPolicy = mock(RetryPolicyStrategy.class);
-        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.markFailedIfLeased(any(), any(), anyLong(), anyInt(), any(), any(), any())).thenReturn(true);
         when(retryPolicy.plan(any(), anyInt()))
                 .thenReturn(new RetryPolicyStrategy.RetryPlan(
                         RetryClassification.TRANSIENT,
@@ -52,14 +54,14 @@ class OutboxRetryHandlerTest {
         assertEquals("NETWORK", outbox.getFailureType());
         assertEquals("connection reset", outbox.getLastFailureReason());
         assertNotNull(outbox.getNextAttemptAt());
-        verify(repository, times(1)).save(outbox);
+        verify(repository, times(1)).markFailedIfLeased(eq(outbox.getId()), eq("lease-a"), eq(0L), eq(1), eq("NETWORK"), eq("connection reset"), any());
     }
 
     @Test
     void handleFailureTerminalizesPermanentFailureImmediately() {
         OutboxRepository repository = mock(OutboxRepository.class);
         RetryPolicyStrategy retryPolicy = mock(RetryPolicyStrategy.class);
-        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.markFailedIfLeased(any(), any(), anyLong(), anyInt(), any(), any(), any())).thenReturn(true);
         when(retryPolicy.plan(any(), anyInt()))
                 .thenReturn(new RetryPolicyStrategy.RetryPlan(
                         RetryClassification.PERMANENT,
@@ -79,7 +81,7 @@ class OutboxRetryHandlerTest {
 
         assertEquals(1, outbox.getRetryCount());
         assertEquals(OutboxStatus.FAILED, outbox.getStatus());
-        verify(repository, times(1)).save(outbox);
+        verify(repository, times(1)).markFailedIfLeased(eq(outbox.getId()), eq("lease-a"), eq(0L), eq(1), eq("VALIDATION"), eq("invalid schema payload"), any());
     }
 
     private OutboxEntity outboxEntity() {
@@ -90,6 +92,7 @@ class OutboxRetryHandlerTest {
         outbox.setEventType("ORDER_CREATED");
         outbox.setPayload("{}");
         outbox.setStatus(OutboxStatus.FAILED);
+        outbox.setLeaseOwner("lease-a");
         outbox.setRetryCount(0);
         outbox.setPartitionKey(1);
         outbox.setCreatedAt(Instant.now().minusSeconds(30));

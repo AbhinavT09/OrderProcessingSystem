@@ -65,6 +65,12 @@ public class OutboxEntity {
     @Column(length = 256)
     private String lastFailureReason;
 
+    @Column(length = 128)
+    private String leaseOwner;
+
+    @Column(nullable = false)
+    private Long leaseVersion;
+
     @PrePersist
     /**
      * Initializes defaults before first insert.
@@ -88,6 +94,9 @@ public class OutboxEntity {
         }
         if (nextAttemptAt == null) {
             nextAttemptAt = now;
+        }
+        if (leaseVersion == null) {
+            leaseVersion = 0L;
         }
         if (createdAt == null) {
             createdAt = now;
@@ -293,5 +302,21 @@ public class OutboxEntity {
 
     public void setLastFailureReason(String lastFailureReason) {
         this.lastFailureReason = lastFailureReason;
+    }
+
+    public String getLeaseOwner() {
+        return leaseOwner;
+    }
+
+    public void setLeaseOwner(String leaseOwner) {
+        this.leaseOwner = leaseOwner;
+    }
+
+    public Long getLeaseVersion() {
+        return leaseVersion;
+    }
+
+    public void setLeaseVersion(Long leaseVersion) {
+        this.leaseVersion = leaseVersion;
     }
 }

@@ -1,3 +1,9 @@
+---
+title: Infrastructure Layer
+parent: Reference
+nav_order: 4
+---
+
 # Infrastructure Layer Reference
 
 ## Scope
@@ -61,18 +67,42 @@ Infrastructure implements application ports and hosts all external-system integr
   - adaptive classification (`TRANSIENT`, `SEMI_TRANSIENT`, `PERMANENT`)
   - jittered bounded delay + failure reason persistence
 
+#### End-to-end publication sequence (expanded)
+
+1. `OutboxPublisher` polls and selects instance-owned partitions.
+2. `OutboxFetcher` claims rows due for retry/publication in a DB transaction.
+3. Claimed rows are marked `IN_FLIGHT` with `leaseOwner` and incremented `leaseVersion`.
+4. `OutboxProcessor` asynchronously publishes to Kafka via `EventPublisher`.
+5. Success callback attempts fenced transition to `SENT`.
+6. Failure callback delegates to `OutboxRetryHandler`, which computes adaptive delay.
+7. Retry handler writes fenced `FAILED` transition with `nextAttemptAt`.
+8. Scheduler permit is released only after async completion to avoid hidden in-flight work.
+
+This sequence is intentionally split so DB atomicity and broker delivery can be reasoned about independently.
+
 ### Outbox state model (`OutboxStatus`)
 
 - `PENDING`: ready for first publication
-- `FAILED`: publish attempt failed or leased in-flight; eligible for retry by `nextAttemptAt`
+- `IN_FLIGHT`: row is atomically leased by a worker; recoverable when lease expires (`nextAttemptAt`)
+- `FAILED`: publish attempt failed; eligible for retry by `nextAttemptAt`
 - `SENT`: publication completed successfully; eligible for archival cleanup
 
 ### Claiming and concurrency controls
 
 - partition-aware claim prevents worker overlap across partitions
-- skip-locked SQL claim avoids duplicate leasing under concurrent schedulers
+- skip-locked SQL claim avoids lock contention under concurrent schedulers
+- claim transaction immediately transitions rows to `IN_FLIGHT` and persists lease expiry before commit
+- each claimed batch receives a generated `leaseOwner` token and monotonic `leaseVersion`
+- success/failure transitions are conditional (`markSentIfLeased`/`markFailedIfLeased`) using owner+version fencing so stale workers cannot overwrite newer claims
+- expired `IN_FLIGHT` leases are reclaimable for crash recovery
 - semaphore in publisher limits global in-flight worker pressure
 - batch-size controls enforce predictable per-poll work bounds
+
+### Publish completion semantics
+
+- worker slots are released only after async publish futures complete
+- this prevents optimistic over-dispatch where scheduler slots free early while broker acks are still pending
+- publish and retry callbacks execute fenced state transitions and are safe against lease reclaims
 
 ### Producer path (`KafkaEventPublisher`)
 
@@ -153,6 +183,7 @@ Infrastructure implements application ports and hosts all external-system integr
 
 - `PostgresOrderRepository`
   - implements `OrderRepository` port
+  - maps `OrderRecord` <-> `OrderEntity` to keep infrastructure models out of application contracts
   - find/save operations for order read/write paths
 - `JpaOutboxRepository`
   - implements `OutboxRepository`
@@ -171,6 +202,7 @@ Infrastructure implements application ports and hosts all external-system integr
 - `OutboxEntity`
   - active outbox row including retry and scheduling metadata
   - failure metadata (`failureType`, `lastFailureReason`) for adaptive retries
+  - explicit in-flight lease state plus lease fencing metadata (`leaseOwner`, `leaseVersion`, `nextAttemptAt`)
   - lifecycle hooks initialize defaults and timestamps
 - `OutboxArchiveEntity`
   - immutable historical copy of sent events
@@ -271,7 +303,7 @@ sequenceDiagram
 
 | Area | Failure | Protective behavior | Outcome |
 |---|---|---|---|
-| Outbox publish | Kafka unavailable | retry/backoff + failed status | eventual publication after recovery |
+| Outbox publish | Kafka unavailable | `IN_FLIGHT` lease + adaptive retry/backoff + failed status | eventual publication after recovery |
 | Consumer | duplicate delivery | processed-event dedupe | no duplicate state mutation |
 | Cache | Redis failure | fail-soft read path | DB fallback, higher latency possible |
 | Rate limiting | Redis script error | fail-open policy | availability prioritized over throttling |

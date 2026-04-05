@@ -1,14 +1,12 @@
 package com.example.orderprocessing.infrastructure.messaging;
 
+import com.example.orderprocessing.application.port.OrderItemRecord;
+import com.example.orderprocessing.application.port.OrderRecord;
 import com.example.orderprocessing.application.port.OrderRepository;
 import com.example.orderprocessing.application.port.ProcessedEventRepository;
 import com.example.orderprocessing.application.service.OrderMapper;
 import com.example.orderprocessing.domain.order.OrderStatus;
 import com.example.orderprocessing.infrastructure.messaging.consumer.OrderCreatedConsumer;
-import com.example.orderprocessing.infrastructure.messaging.retry.RetryClassification;
-import com.example.orderprocessing.infrastructure.messaging.retry.RetryPolicyStrategy;
-import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
-import com.example.orderprocessing.infrastructure.persistence.entity.OrderItemEmbeddable;
 import com.example.orderprocessing.infrastructure.persistence.entity.ProcessedEventEntity;
 import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
 import com.example.orderprocessing.infrastructure.resilience.RegionalConsistencyManager;
@@ -24,6 +22,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -33,7 +34,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -49,11 +49,7 @@ class OrderCreatedConsumerUnitTest {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         BackpressureManager backpressureManager = mock(BackpressureManager.class);
         RegionalConsistencyManager regionalConsistencyManager = mock(RegionalConsistencyManager.class);
-        RetryPolicyStrategy retryPolicyStrategy = mock(RetryPolicyStrategy.class);
         when(regionalConsistencyManager.shouldApplyIncomingUpdate(any(), any(), any(), any())).thenReturn(true);
-        when(retryPolicyStrategy.plan(any(), anyInt()))
-                .thenReturn(new RetryPolicyStrategy.RetryPlan(
-                        RetryClassification.TRANSIENT, 1L, "SYSTEM", "test"));
         OrderCreatedConsumer consumer = new OrderCreatedConsumer(
                 new VersionedJsonOrderCreatedEventSchemaRegistry(
                         new ObjectMapper(),
@@ -65,7 +61,7 @@ class OrderCreatedConsumerUnitTest {
                 new TransactionTemplate(new NoopTransactionManager()),
                 backpressureManager,
                 regionalConsistencyManager,
-                retryPolicyStrategy);
+                300_000L);
 
         String payload = """
                 {
@@ -79,53 +75,64 @@ class OrderCreatedConsumerUnitTest {
         Acknowledgment ack = () -> { };
         consumer.consume(payload, ack);
 
-        assertEquals(OrderStatus.PROCESSING, orderRepository.findById(orderId).orElseThrow().getStatus());
+        assertEquals(OrderStatus.PROCESSING, orderRepository.findById(orderId).orElseThrow().status());
         assertEquals(1, processedRepository.savedCount());
     }
 
-    private static OrderEntity buildOrder(UUID id, OrderStatus status) {
-        OrderEntity entity = new OrderEntity();
-        entity.setId(id);
-        entity.setStatus(status);
-        entity.setCreatedAt(Instant.now().minus(10, ChronoUnit.MINUTES));
-        entity.setVersion(0L);
-        entity.setRegionId("region-a");
-        entity.setLastUpdatedTimestamp(Instant.now().minus(10, ChronoUnit.MINUTES));
-
-        OrderItemEmbeddable item = new OrderItemEmbeddable();
-        item.setProductName("Item");
-        item.setQuantity(1);
-        item.setPrice(10.0);
-        entity.setItems(List.of(item));
-        return entity;
+    private static OrderRecord buildOrder(UUID id, OrderStatus status) {
+        return new OrderRecord(
+                id,
+                0L,
+                status,
+                Instant.now().minus(10, ChronoUnit.MINUTES),
+                null,
+                "region-a",
+                Instant.now().minus(10, ChronoUnit.MINUTES),
+                List.of(new OrderItemRecord("Item", 1, 10.0)));
     }
 
     private static final class InMemoryOrderRepository implements OrderRepository {
-        private final Map<UUID, OrderEntity> store = new HashMap<>();
+        private final Map<UUID, OrderRecord> store = new HashMap<>();
 
         @Override
-        public OrderEntity save(OrderEntity order) {
-            store.put(order.getId(), order);
+        public OrderRecord save(OrderRecord order) {
+            store.put(order.id(), order);
             return order;
         }
 
         @Override
-        public Optional<OrderEntity> findById(UUID id) {
+        public Optional<OrderRecord> findById(UUID id) {
             return Optional.ofNullable(store.get(id));
         }
 
         @Override
-        public List<OrderEntity> findAll() {
+        public List<OrderRecord> findAll() {
             return new ArrayList<>(store.values());
         }
 
         @Override
-        public List<OrderEntity> findByStatus(OrderStatus status) {
-            return store.values().stream().filter(o -> o.getStatus() == status).toList();
+        public List<OrderRecord> findByStatus(OrderStatus status) {
+            return store.values().stream().filter(o -> o.status() == status).toList();
         }
 
         @Override
-        public Optional<OrderEntity> findByIdempotencyKey(String idempotencyKey) {
+        public Page<OrderRecord> findAll(Pageable pageable) {
+            List<OrderRecord> all = findAll();
+            int start = (int) Math.min((long) pageable.getPageNumber() * pageable.getPageSize(), all.size());
+            int end = Math.min(start + pageable.getPageSize(), all.size());
+            return new PageImpl<>(all.subList(start, end), pageable, all.size());
+        }
+
+        @Override
+        public Page<OrderRecord> findByStatus(OrderStatus status, Pageable pageable) {
+            List<OrderRecord> filtered = findByStatus(status);
+            int start = (int) Math.min((long) pageable.getPageNumber() * pageable.getPageSize(), filtered.size());
+            int end = Math.min(start + pageable.getPageSize(), filtered.size());
+            return new PageImpl<>(filtered.subList(start, end), pageable, filtered.size());
+        }
+
+        @Override
+        public Optional<OrderRecord> findByIdempotencyKey(String idempotencyKey) {
             return Optional.empty();
         }
     }
@@ -139,9 +146,12 @@ class OrderCreatedConsumerUnitTest {
         }
 
         @Override
-        public ProcessedEventEntity save(ProcessedEventEntity event) {
+        public void save(String eventId, String eventType, Instant processedAt) {
+            ProcessedEventEntity event = new ProcessedEventEntity();
+            event.setEventId(eventId);
+            event.setEventType(eventType);
+            event.setProcessedAt(processedAt);
             processed.add(event);
-            return event;
         }
 
         int savedCount() {

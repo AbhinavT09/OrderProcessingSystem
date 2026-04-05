@@ -1,3 +1,9 @@
+---
+title: Reference
+nav_order: 20
+has_children: true
+---
+
 # Reference Documentation
 
 This section is the implementation-level map of packages, classes, and responsibilities.

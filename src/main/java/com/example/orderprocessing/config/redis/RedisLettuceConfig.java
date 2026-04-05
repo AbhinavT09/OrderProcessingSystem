@@ -11,8 +11,15 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 /**
- * RedisLettuceConfig implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Redis client connectivity tuning for distributed cache and rate-limit adapters.
+ *
+ * <p><b>Architecture role:</b> infrastructure configuration for Redis-backed adapters
+ * (cache provider, idempotency coordination, and distributed rate limiting).</p>
+ *
+ * <p><b>Resilience context:</b> configures reconnect and timeouts to fail fast on unhealthy links
+ * while enabling quick recovery once Redis is reachable again.</p>
+ *
+ * <p><b>Transaction boundary:</b> none. Redis commands are outside DB/Kafka transactions.</p>
  */
 public class RedisLettuceConfig {
 

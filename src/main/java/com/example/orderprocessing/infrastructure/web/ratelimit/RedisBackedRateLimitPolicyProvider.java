@@ -116,10 +116,10 @@ public class RedisBackedRateLimitPolicyProvider implements RateLimitPolicyProvid
 
     private String endpointClass(String method, String requestUri) {
         String uri = Objects.requireNonNullElse(requestUri, "/");
-        if (uri.startsWith("/api/orders") && !"GET".equalsIgnoreCase(method)) {
+        if ((uri.startsWith("/api/orders") || uri.startsWith("/orders")) && !"GET".equalsIgnoreCase(method)) {
             return "critical-write";
         }
-        if (uri.startsWith("/api/orders")) {
+        if (uri.startsWith("/api/orders") || uri.startsWith("/orders")) {
             return "standard";
         }
         return "default";

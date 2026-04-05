@@ -11,8 +11,12 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 /**
- * RoleClaimJwtAuthenticationConverter implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * JWT-to-authority converter for interface-layer authorization.
+ *
+ * <p><b>Architecture role:</b> infrastructure security adapter used by Spring Resource Server.</p>
+ *
+ * <p><b>Resilience and idempotency context:</b> stateless conversion logic; repeated token parsing
+ * yields deterministic authority mapping with no side effects.</p>
  */
 public class RoleClaimJwtAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
 

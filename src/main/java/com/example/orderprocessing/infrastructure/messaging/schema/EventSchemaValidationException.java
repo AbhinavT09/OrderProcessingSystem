@@ -1,8 +1,10 @@
 package com.example.orderprocessing.infrastructure.messaging.schema;
 
 /**
- * EventSchemaValidationException implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Exception raised when event schema contracts are violated.
+ *
+ * <p><b>Architecture role:</b> infrastructure messaging exception used by schema adapters to
+ * fail malformed payloads before business processing.</p>
  */
 public class EventSchemaValidationException extends RuntimeException {
     /**

@@ -17,8 +17,15 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Component
 /**
- * OutboxRetryHandler implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Applies adaptive retry policy and persists fenced failure transitions.
+ *
+ * <p><b>Architecture role:</b> infrastructure adapter for resilience policy execution.</p>
+ *
+ * <p><b>Resilience context:</b> classifies failures as transient, semi-transient, or permanent;
+ * computes jittered retry delays; fails terminally when retry budget is exhausted.</p>
+ *
+ * <p><b>Transactional context:</b> retry metadata updates execute in DB transactions; no Kafka
+ * transaction logic is owned here.</p>
  */
 public class OutboxRetryHandler {
 
@@ -35,11 +42,13 @@ public class OutboxRetryHandler {
     private final RetryPolicyStrategy retryPolicyStrategy;
 
     /**
-     * Creates retry handling for failed outbox events.
-     * @param outboxRepository outbox repository for failed-event updates
+     * Creates retry handling for failed outbox publish attempts.
+     *
+     * @param outboxRepository outbox repository for failed-event transitions
+     * @param transactionTemplate template bound to primary transactional manager
      * @param meterRegistry metrics registry
+     * @param retryPolicyStrategy adaptive retry classifier/planner
      * @param maxRetries maximum retry attempts before terminal state
-     * @param baseBackoff base backoff duration
      */
     public OutboxRetryHandler(OutboxRepository outboxRepository,
                               TransactionTemplate transactionTemplate,
@@ -58,9 +67,10 @@ public class OutboxRetryHandler {
     }
 
     /**
-     * Executes handleFailure.
-     * @param outboxEvent input argument used by this operation
-     * @param throwable input argument used by this operation
+     * Applies retry policy for one failed publish and persists next state.
+     *
+     * @param outboxEvent currently leased outbox row
+     * @param throwable publication failure cause
      */
     public void handleFailure(OutboxEntity outboxEvent, Throwable throwable) {
         transactionTemplate.executeWithoutResult(status -> {
@@ -74,9 +84,23 @@ public class OutboxRetryHandler {
             incrementClassificationCounter(retryPlan.classification().name());
 
             if (retries >= maxRetries || "PERMANENT".equals(retryPlan.classification().name())) {
+                Instant nextAttemptAt = Instant.now().plus(3650, ChronoUnit.DAYS);
+                boolean updated = outboxRepository.markFailedIfLeased(
+                        outboxEvent.getId(),
+                        outboxEvent.getLeaseOwner(),
+                        outboxEvent.getLeaseVersion() == null ? 0L : outboxEvent.getLeaseVersion(),
+                        retries,
+                        retryPlan.failureType(),
+                        retryPlan.failureReason(),
+                        nextAttemptAt);
+                if (!updated) {
+                    log.warn("Skipping stale retry terminal update outboxId={} leaseOwner={}",
+                            outboxEvent.getId(), outboxEvent.getLeaseOwner());
+                    return;
+                }
                 outboxEvent.setStatus(OutboxStatus.FAILED);
-                outboxEvent.setNextAttemptAt(Instant.now().plus(3650, ChronoUnit.DAYS));
-                outboxRepository.save(outboxEvent);
+                outboxEvent.setLeaseOwner(null);
+                outboxEvent.setNextAttemptAt(nextAttemptAt);
                 log.error("Outbox max retries reached outboxId={} aggregateId={} retries={} reason={}",
                         outboxEvent.getId(), outboxEvent.getAggregateId(), retries, throwable.toString());
                 return;
@@ -84,9 +108,23 @@ public class OutboxRetryHandler {
 
             long delayMs = retryPlan.delayMs();
             retryDelaySummary.record(delayMs);
+            Instant nextAttemptAt = Instant.now().plusMillis(delayMs);
+            boolean updated = outboxRepository.markFailedIfLeased(
+                    outboxEvent.getId(),
+                    outboxEvent.getLeaseOwner(),
+                    outboxEvent.getLeaseVersion() == null ? 0L : outboxEvent.getLeaseVersion(),
+                    retries,
+                    retryPlan.failureType(),
+                    retryPlan.failureReason(),
+                    nextAttemptAt);
+            if (!updated) {
+                log.warn("Skipping stale retry update outboxId={} leaseOwner={}",
+                        outboxEvent.getId(), outboxEvent.getLeaseOwner());
+                return;
+            }
             outboxEvent.setStatus(OutboxStatus.FAILED);
-            outboxEvent.setNextAttemptAt(Instant.now().plusMillis(delayMs));
-            outboxRepository.save(outboxEvent);
+            outboxEvent.setLeaseOwner(null);
+            outboxEvent.setNextAttemptAt(nextAttemptAt);
             log.warn("Outbox publish failed outboxId={} aggregateId={} retries={} nextAttemptInMs={} reason={}",
                     outboxEvent.getId(), outboxEvent.getAggregateId(), retries, delayMs, throwable.toString());
         });

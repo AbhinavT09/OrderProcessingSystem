@@ -6,6 +6,7 @@ import com.example.orderprocessing.infrastructure.persistence.entity.OutboxStatu
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -38,6 +39,7 @@ class OutboxPublisherTest {
         event.setCreatedAt(Instant.now());
         when(fetcher.claimPartitionBatch(eq(0), eq(12), eq(100))).thenReturn(List.of(event));
         when(fetcher.claimPartitionBatch(eq(1), eq(12), eq(100))).thenReturn(List.of());
+        when(processor.processBatch(List.of(event))).thenReturn(CompletableFuture.completedFuture(null));
 
         OutboxPublisher publisher = new OutboxPublisher(
                 repository,

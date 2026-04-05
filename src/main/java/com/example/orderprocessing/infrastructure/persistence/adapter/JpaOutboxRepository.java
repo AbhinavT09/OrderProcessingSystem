@@ -46,6 +46,11 @@ public class JpaOutboxRepository implements OutboxRepository {
     }
 
     @Override
+    public List<OutboxEntity> saveAll(List<OutboxEntity> outboxEvents) {
+        return repository.saveAll(outboxEvents);
+    }
+
+    @Override
     /**
      * Reads a small ordered batch by status for compatibility reads.
      *
@@ -77,6 +82,23 @@ public class JpaOutboxRepository implements OutboxRepository {
      */
     public boolean existsByIdAndStatus(UUID id, OutboxStatus status) {
         return repository.existsByIdAndStatus(id, status);
+    }
+
+    @Override
+    public boolean markSentIfLeased(UUID id, String leaseOwner, long leaseVersion, Instant nextAttemptAt) {
+        return repository.markSentIfLeased(id, leaseOwner, leaseVersion, nextAttemptAt) > 0;
+    }
+
+    @Override
+    public boolean markFailedIfLeased(UUID id,
+                                      String leaseOwner,
+                                      long leaseVersion,
+                                      int retryCount,
+                                      String failureType,
+                                      String failureReason,
+                                      Instant nextAttemptAt) {
+        return repository.markFailedIfLeased(
+                id, leaseOwner, leaseVersion, retryCount, failureType, failureReason, nextAttemptAt) > 0;
     }
 
     @Override

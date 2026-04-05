@@ -14,6 +14,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
@@ -33,6 +34,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>Duplicate publication risk is reduced by lease/claim semantics in the fetcher and by explicit
  * status transitions handled by processor/retry collaborators.</p>
+ *
+ * <p><b>Resilience context:</b> combines worker-level backpressure, partition ownership sharding,
+ * and completion-aware async handling to avoid over-dispatch during broker slowness.</p>
+ *
+ * <p><b>Transactional context:</b> scheduling is non-transactional, but cleanup and repository
+ * transitions execute through DB transaction templates.</p>
  */
 public class OutboxPublisher {
 
@@ -164,7 +171,12 @@ public class OutboxPublisher {
         if (claimed.isEmpty()) {
             return;
         }
-        outboxProcessor.processBatch(claimed);
+        try {
+            outboxProcessor.processBatch(claimed).join();
+        } catch (CompletionException ex) {
+            Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+            log.warn("Outbox async publish completion had failures partition={} reason={}", partition, cause.toString());
+        }
     }
 
     private List<Integer> ownedPartitions() {

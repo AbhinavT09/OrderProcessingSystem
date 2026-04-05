@@ -1,3 +1,9 @@
+---
+title: Domain Layer
+parent: Reference
+nav_order: 3
+---
+
 # Domain Layer Reference
 
 ## Package Location

@@ -1,3 +1,8 @@
+---
+title: Home
+nav_order: 1
+---
+
 # Order Processing System Documentation
 
 This documentation describes the current implementation after adaptive retry, dynamic rate limiting, active-active consistency controls, transactional Kafka publishing, and system-wide backpressure propagation.

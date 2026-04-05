@@ -1,8 +1,13 @@
 package com.example.orderprocessing.application.exception;
 
 /**
- * NotFoundException implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Domain/application not-found signal for missing resources.
+ *
+ * <p><b>Architecture role:</b> application-layer exception translated by interface adapters into
+ * HTTP {@code 404} responses.</p>
+ *
+ * <p><b>Transaction boundary:</b> causes transaction rollback when thrown inside transactional
+ * command handlers.</p>
  */
 public class NotFoundException extends RuntimeException {
     /**

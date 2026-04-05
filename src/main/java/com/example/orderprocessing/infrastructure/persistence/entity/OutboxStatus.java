@@ -8,6 +8,7 @@ package com.example.orderprocessing.infrastructure.persistence.entity;
  */
 public enum OutboxStatus {
     PENDING,
+    IN_FLIGHT,
     SENT,
     FAILED
 }

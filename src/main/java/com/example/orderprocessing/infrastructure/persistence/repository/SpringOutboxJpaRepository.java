@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -41,7 +42,7 @@ public interface SpringOutboxJpaRepository extends JpaRepository<OutboxEntity, U
     @Query(value = """
             SELECT * FROM outbox_events oe
             WHERE oe.partition_key = :partitionKey
-              AND oe.status IN ('PENDING', 'FAILED')
+              AND oe.status IN ('PENDING', 'FAILED', 'IN_FLIGHT')
               AND oe.next_attempt_at <= :now
               AND oe.retry_count < :maxRetries
             ORDER BY oe.created_at ASC
@@ -53,6 +54,46 @@ public interface SpringOutboxJpaRepository extends JpaRepository<OutboxEntity, U
             @Param("now") Instant now,
             @Param("maxRetries") int maxRetries,
             @Param("batchSize") int batchSize);
+
+    @Modifying
+    @Query("""
+            UPDATE OutboxEntity oe
+            SET oe.status = com.example.orderprocessing.infrastructure.persistence.entity.OutboxStatus.SENT,
+                oe.nextAttemptAt = :nextAttemptAt,
+                oe.failureType = null,
+                oe.lastFailureReason = null,
+                oe.leaseOwner = null
+            WHERE oe.id = :id
+              AND oe.status = com.example.orderprocessing.infrastructure.persistence.entity.OutboxStatus.IN_FLIGHT
+              AND oe.leaseOwner = :leaseOwner
+              AND oe.leaseVersion = :leaseVersion
+            """)
+    int markSentIfLeased(@Param("id") UUID id,
+                         @Param("leaseOwner") String leaseOwner,
+                         @Param("leaseVersion") long leaseVersion,
+                         @Param("nextAttemptAt") Instant nextAttemptAt);
+
+    @Modifying
+    @Query("""
+            UPDATE OutboxEntity oe
+            SET oe.status = com.example.orderprocessing.infrastructure.persistence.entity.OutboxStatus.FAILED,
+                oe.retryCount = :retryCount,
+                oe.failureType = :failureType,
+                oe.lastFailureReason = :failureReason,
+                oe.nextAttemptAt = :nextAttemptAt,
+                oe.leaseOwner = null
+            WHERE oe.id = :id
+              AND oe.status = com.example.orderprocessing.infrastructure.persistence.entity.OutboxStatus.IN_FLIGHT
+              AND oe.leaseOwner = :leaseOwner
+              AND oe.leaseVersion = :leaseVersion
+            """)
+    int markFailedIfLeased(@Param("id") UUID id,
+                           @Param("leaseOwner") String leaseOwner,
+                           @Param("leaseVersion") long leaseVersion,
+                           @Param("retryCount") int retryCount,
+                           @Param("failureType") String failureType,
+                           @Param("failureReason") String failureReason,
+                           @Param("nextAttemptAt") Instant nextAttemptAt);
 
     /**
      * Retrieves sent rows older than a cutoff for archival.

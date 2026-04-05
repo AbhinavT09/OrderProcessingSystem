@@ -13,8 +13,12 @@ import org.springframework.stereotype.Component;
 
 @Component
 /**
- * KafkaConsumerRebalanceObserver implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Observer for Kafka consumer lifecycle and partition rebalance events.
+ *
+ * <p><b>Architecture role:</b> infrastructure observability adapter; it does not process business
+ * payloads but surfaces operational state transitions through logs.</p>
+ *
+ * <p><b>Transaction boundary:</b> none. This class is event-driven telemetry only.</p>
  */
 public class KafkaConsumerRebalanceObserver {
 

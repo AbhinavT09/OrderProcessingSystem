@@ -3,6 +3,7 @@ package com.example.orderprocessing.infrastructure.persistence.adapter;
 import com.example.orderprocessing.application.port.ProcessedEventRepository;
 import com.example.orderprocessing.infrastructure.persistence.entity.ProcessedEventEntity;
 import com.example.orderprocessing.infrastructure.persistence.repository.SpringProcessedEventJpaRepository;
+import java.time.Instant;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -39,10 +40,15 @@ public class JpaProcessedEventRepository implements ProcessedEventRepository {
     /**
      * Persists a processed-event marker.
      *
-     * @param event processed event marker
-     * @return persisted marker entity
+     * @param eventId consumed event identifier
+     * @param eventType consumed event type
+     * @param processedAt marker timestamp
      */
-    public ProcessedEventEntity save(ProcessedEventEntity event) {
-        return repository.save(event);
+    public void save(String eventId, String eventType, Instant processedAt) {
+        ProcessedEventEntity event = new ProcessedEventEntity();
+        event.setEventId(eventId);
+        event.setEventType(eventType);
+        event.setProcessedAt(processedAt);
+        repository.save(event);
     }
 }

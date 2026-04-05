@@ -1,3 +1,8 @@
+---
+title: Observability and Operations
+nav_order: 4
+---
+
 # Observability, Logging, Monitoring, and Operations
 
 ## 1. Logging Model
@@ -56,6 +61,7 @@ Structured logging fields include:
 - `backpressure.outbox.backlog`
 - `backpressure.kafka.lag.ms`
 - `backpressure.db.saturation.percent`
+- `db.query.duration` (histogram + exemplars when trace context exists)
 
 ### Outbox metrics
 
@@ -124,6 +130,43 @@ flowchart LR
     BPM --> RLP[RateLimitPolicyProvider adaptive policy]
     BPM --> RETRY[AdaptiveRetryPolicyStrategy]
 ```
+
+Interpretation details:
+
+1. Lag and backlog signals are normalized into a single pressure level.
+2. Pressure level drives three downstream controls: write admission, rate-limit policy, and retry delay.
+3. Controls are intentionally asymmetric:
+   - rate limits tighten first (protects availability),
+   - retry delays increase second (reduces downstream thrash),
+   - write rejection activates last (protects correctness under critical saturation).
+4. This staged behavior prevents abrupt mode flapping and keeps eventual drain possible.
+
+## 5.2 Exemplar-driven Debugging (Prometheus -> Trace)
+
+The service now emits exemplar-friendly histograms for:
+
+- `http.server.requests`
+- `db.query.duration`
+
+With tracing enabled, Micrometer attaches the active `trace_id` as exemplar metadata to latency buckets.
+Operational workflow:
+
+1. SRE spots spike in Prometheus latency histogram.
+2. SRE opens bucket exemplar and extracts trace id.
+3. Trace id is queried in Jaeger/Tempo.
+4. Full distributed path is inspected (controller -> query service -> repository/cache fallback).
+
+This removes guesswork when separating saturation from path-specific regressions.
+
+## 5.3 HLC Conflict Telemetry Notes
+
+Regional conflict evaluation now uses Hybrid Logical Clock ordering:
+
+- physical clock in milliseconds (`lastUpdatedTimestamp` / incoming `occurredAt`)
+- logical counter (`version`)
+
+When HLC comparison rejects an update, `region.conflict.rejected.count` increments.
+This metric should be interpreted alongside clock-skew and replication-delay dashboards.
 
 ## 6. Operational Alerts and Interpretation
 
@@ -246,4 +289,13 @@ Action:
 - Verify trace export endpoint and sampling settings.
 - Verify outbox backlog and DLQ trends on deployments.
 - Verify regional health and failover mode in `/actuator/health` (`multiRegion`).
+
+## 10. P2 Chaos and Load Validation Matrix
+
+| Scenario | Injected Fault | Expected Signal | Pass Criteria |
+|---|---|---|---|
+| Slow broker acks | broker latency and partial throttling | `outbox.publish.latency` p95 rises | in-flight publishes remain capped (`app.outbox.publisher.max-in-flight`) |
+| Lease reclaim race | worker delayed beyond lease expiry | fenced update rejection logs and counters | no stale `IN_FLIGHT -> SENT` overwrite |
+| Redis degradation | Redis unavailable during rate-limit checks | `redis.connection.failures` increases | API remains available (fail-open) |
+| Consumer retry pressure | transient DB failures | `kafka.consumer.retry.count` increases | no listener thread sleep stalls |
 

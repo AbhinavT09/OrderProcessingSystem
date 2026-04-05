@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Semaphore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -24,6 +25,13 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>Parses payloads, invokes asynchronous event publisher, and transitions rows to SENT or retry
  * states. This component is part of the reliable outbox delivery pipeline.</p>
+ *
+ * <p><b>Idempotency and resilience context:</b> completion and failure callbacks use lease-fenced
+ * repository transitions, so stale callbacks cannot corrupt newer claims. In-flight publish count
+ * is bounded with a semaphore.</p>
+ *
+ * <p><b>Transactional context:</b> Kafka send is async and may run in producer-managed Kafka
+ * transactions; status transitions to {@code SENT}/{@code FAILED} run in DB transaction templates.</p>
  */
 public class OutboxProcessor {
 
@@ -32,10 +40,10 @@ public class OutboxProcessor {
     private final OrderCreatedEventSchemaRegistry schemaRegistry;
     private final TransactionTemplate transactionTemplate;
     private final OutboxRetryHandler retryHandler;
-    private final long inFlightLeaseMs;
     private final Timer publishLatencyTimer;
     private final DistributionSummary outboxLagSummary;
     private final Counter publishRateCounter;
+    private final Semaphore publishInFlightSemaphore;
 
     /**
      * Creates an outbox batch processor.
@@ -49,16 +57,16 @@ public class OutboxProcessor {
                            TransactionTemplate transactionTemplate,
                            OutboxRetryHandler retryHandler,
                            MeterRegistry meterRegistry,
-                           @Value("${app.outbox.publisher.in-flight-lease-ms:30000}") long inFlightLeaseMs) {
+                           @Value("${app.outbox.publisher.max-in-flight:16}") int maxInFlightPublishes) {
         this.eventPublisher = eventPublisher;
         this.outboxRepository = outboxRepository;
         this.schemaRegistry = schemaRegistry;
         this.transactionTemplate = transactionTemplate;
         this.retryHandler = retryHandler;
-        this.inFlightLeaseMs = Math.max(1000, inFlightLeaseMs);
         this.publishLatencyTimer = meterRegistry.timer("outbox.publish.latency");
         this.outboxLagSummary = DistributionSummary.builder("outbox.lag").register(meterRegistry);
         this.publishRateCounter = meterRegistry.counter("outbox.publish.rate");
+        this.publishInFlightSemaphore = new Semaphore(Math.max(1, maxInFlightPublishes));
     }
 
     /**
@@ -68,34 +76,33 @@ public class OutboxProcessor {
      *
      * @param claimed rows leased for the current processing window
      */
-    public void processBatch(List<OutboxEntity> claimed) {
-        for (OutboxEntity event : claimed) {
-            publishOne(event);
-        }
+    public CompletableFuture<Void> processBatch(List<OutboxEntity> claimed) {
+        List<CompletableFuture<Void>> futures = claimed.stream().map(this::publishOne).toList();
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
     }
 
-    private void publishOne(OutboxEntity outboxEvent) {
+    private CompletableFuture<Void> publishOne(OutboxEntity outboxEvent) {
         if (outboxEvent.getStatus() == OutboxStatus.SENT) {
-            return;
+            return CompletableFuture.completedFuture(null);
         }
         try {
+            publishInFlightSemaphore.acquireUninterruptibly();
             OrderCreatedEvent event = parse(outboxEvent.getPayload());
-            // Mark as leased while async publish is in-flight to reduce duplicate claims.
-            outboxEvent.setStatus(OutboxStatus.FAILED);
-            outboxEvent.setNextAttemptAt(Instant.now().plusMillis(inFlightLeaseMs));
-            outboxRepository.save(outboxEvent);
             Timer.Sample sample = Timer.start();
             CompletableFuture<Void> publishFuture = eventPublisher.publishOrderCreated(event);
-            publishFuture.whenComplete((ignored, ex) -> {
+            return publishFuture.whenComplete((ignored, ex) -> {
                 sample.stop(publishLatencyTimer);
                 if (ex == null) {
                     onPublishSuccess(outboxEvent);
                 } else {
                     retryHandler.handleFailure(outboxEvent, ex);
                 }
+                publishInFlightSemaphore.release();
             });
         } catch (RuntimeException ex) {
+            publishInFlightSemaphore.release();
             retryHandler.handleFailure(outboxEvent, ex);
+            return CompletableFuture.failedFuture(ex);
         }
     }
 
@@ -103,11 +110,20 @@ public class OutboxProcessor {
         transactionTemplate.executeWithoutResult(status -> {
             publishRateCounter.increment();
             outboxLagSummary.record(Math.max(0, Duration.between(outboxEvent.getCreatedAt(), Instant.now()).toMillis()));
+            boolean updated = outboxRepository.markSentIfLeased(
+                    outboxEvent.getId(),
+                    outboxEvent.getLeaseOwner(),
+                    outboxEvent.getLeaseVersion() == null ? 0L : outboxEvent.getLeaseVersion(),
+                    Instant.now());
+            if (!updated) {
+                // Another worker reclaimed this row after lease expiry; avoid stale overwrite.
+                return;
+            }
             outboxEvent.setStatus(OutboxStatus.SENT);
-            outboxEvent.setNextAttemptAt(Instant.now());
+            outboxEvent.setLeaseOwner(null);
             outboxEvent.setFailureType(null);
             outboxEvent.setLastFailureReason(null);
-            outboxRepository.save(outboxEvent);
+            outboxEvent.setNextAttemptAt(Instant.now());
         });
     }
 

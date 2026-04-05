@@ -1,3 +1,8 @@
+---
+title: Testing and Quality
+nav_order: 5
+---
+
 # Testing and Quality
 
 ## 1. Testing Objectives
@@ -30,6 +35,7 @@
 ### Messaging/outbox components
 
 - `OutboxProcessorTest`
+- `OutboxFetcherTest`
 - `OutboxPublisherTest`
 - `KafkaEventPublisherTest`
 - `OrderCreatedConsumerUnitTest`
@@ -38,6 +44,8 @@
 Coverage focus:
 
 - async publish result handling
+- atomic outbox lease transitions (`IN_FLIGHT`) at claim time
+- lease-fenced finalization (`markSentIfLeased`/`markFailedIfLeased`) to prevent stale worker overwrite
 - retry transitions, adaptive classification, and scheduling metadata
 - consumer dedupe and delayed processing behavior
 - transactional Kafka publish path and circuit-open behavior
@@ -65,6 +73,8 @@ Coverage focus:
 
 ```mermaid
 flowchart TD
+    F[OutboxFetcherTest] --> F1[Claimed rows transition to IN_FLIGHT]
+    F --> F2[Lease nextAttemptAt persisted before processing]
     A[OutboxRetryHandlerTest] --> A1[Transient classification schedules nextAttemptAt]
     A --> A2[Permanent classification terminalizes row]
     B[KafkaEventPublisherTest] --> B1[Transactional publish success]
@@ -84,10 +94,25 @@ flowchart TD
 ## 5. Residual Gaps / Next Expansion
 
 - embedded Kafka end-to-end verification (outbox -> producer -> consumer)
-- explicit no-event-loss crash-injection integration around outbox loop
+- crash-injection integration around outbox lease expiry/reclaim path
 - deterministic active-recovery-to-active integration with controlled dependency health
 - conflict resolution strategy permutations under concurrent active-active writes
 - backpressure-level transitions driving write admission and dynamic throttling
+- paginated API contract tests for `GET /orders/page` with size cap and status filter behavior
+
+## 7. Principal Reliability Test Matrix
+
+### P0 contract scenarios
+
+- stale callback rejection: old lease owner/version must fail state transition after reclaim
+- async completion bounding: configured in-flight publish cap must hold under slow broker acks
+- listener liveness: consumer retry path must not block poll loop threads
+
+### P1/P2 operational scenarios
+
+- bounded list behavior at high data volume for `/orders` and `/orders/page`
+- backpressure transition correctness (`NORMAL` -> `ELEVATED` -> `CRITICAL`) and write gating
+- DLQ growth alerts and replay readiness validation
 
 ## 6. Quality Gates
 

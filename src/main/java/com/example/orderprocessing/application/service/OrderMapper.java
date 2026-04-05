@@ -1,11 +1,13 @@
 package com.example.orderprocessing.application.service;
 
+import com.example.orderprocessing.application.port.OrderItemRecord;
+import com.example.orderprocessing.application.port.OrderRecord;
 import com.example.orderprocessing.interfaces.http.dto.OrderItemRequest;
 import com.example.orderprocessing.interfaces.http.dto.OrderResponse;
 import com.example.orderprocessing.domain.order.Order;
 import com.example.orderprocessing.domain.order.OrderItem;
-import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import com.example.orderprocessing.infrastructure.persistence.entity.OrderItemEmbeddable;
+import java.time.Instant;
 import java.util.List;
 import org.springframework.stereotype.Component;
 
@@ -30,20 +32,20 @@ public class OrderMapper {
     /**
      * Rehydrates a domain aggregate from persistence representation.
      *
-     * @param entity JPA entity loaded from storage
+     * @param record persistence-neutral order snapshot
      * @return domain aggregate preserving status/version semantics
      */
-    public Order toDomain(OrderEntity entity) {
-        List<OrderItem> items = entity.getItems().stream()
-                .map(i -> new OrderItem(i.getProductName(), i.getQuantity(), i.getPrice()))
+    public Order toDomain(OrderRecord record) {
+        List<OrderItem> items = record.items().stream()
+                .map(i -> new OrderItem(i.productName(), i.quantity(), i.price()))
                 .toList();
         return Order.rehydrate(
-                entity.getId(),
-                entity.getCreatedAt(),
-                entity.getIdempotencyKey(),
+                record.id(),
+                record.createdAt(),
+                record.idempotencyKey(),
                 items,
-                entity.getStatus(),
-                entity.getVersion());
+                record.status(),
+                record.version());
     }
 
     /**
@@ -52,15 +54,16 @@ public class OrderMapper {
      * @param domain domain aggregate
      * @return entity ready for repository persistence
      */
-    public OrderEntity toEntity(Order domain) {
-        OrderEntity entity = new OrderEntity();
-        entity.setId(domain.getId());
-        entity.setCreatedAt(domain.getCreatedAt());
-        entity.setIdempotencyKey(domain.getIdempotencyKey());
-        entity.setStatus(domain.getStatus());
-        entity.setVersion(domain.getVersion());
-        entity.setItems(toEmbeddables(domain.getItems()));
-        return entity;
+    public OrderRecord toRecord(Order domain, String regionId, Instant lastUpdatedTimestamp) {
+        return new OrderRecord(
+                domain.getId(),
+                domain.getVersion(),
+                domain.getStatus(),
+                domain.getCreatedAt(),
+                domain.getIdempotencyKey(),
+                regionId,
+                lastUpdatedTimestamp,
+                toItemRecords(domain.getItems()));
     }
 
     /**
@@ -84,5 +87,27 @@ public class OrderMapper {
             embeddable.setPrice(item.price());
             return embeddable;
         }).toList();
+    }
+
+    /**
+     * Converts persistence-neutral item records back to embeddable persistence items.
+     *
+     * @param items application-layer item records
+     * @return persistence embeddables
+     */
+    public List<OrderItemEmbeddable> toEmbeddablesFromRecord(List<OrderItemRecord> items) {
+        return items.stream().map(item -> {
+            OrderItemEmbeddable embeddable = new OrderItemEmbeddable();
+            embeddable.setProductName(item.productName());
+            embeddable.setQuantity(item.quantity());
+            embeddable.setPrice(item.price());
+            return embeddable;
+        }).toList();
+    }
+
+    private List<OrderItemRecord> toItemRecords(List<OrderItem> items) {
+        return items.stream()
+                .map(item -> new OrderItemRecord(item.productName(), item.quantity(), item.price()))
+                .toList();
     }
 }

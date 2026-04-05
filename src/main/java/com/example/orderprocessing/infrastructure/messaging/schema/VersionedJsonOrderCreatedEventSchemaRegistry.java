@@ -6,31 +6,51 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
 /**
- * VersionedJsonOrderCreatedEventSchemaRegistry implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * JSON schema adapter for versioned {@code ORDER_CREATED} events.
+ *
+ * <p><b>Architecture role:</b> infrastructure adapter implementing
+ * {@link OrderCreatedEventSchemaRegistry}.</p>
+ *
+ * <p><b>Idempotency and resilience context:</b> normalizes schema versions and validates required
+ * fields so retries process canonical event payloads; malformed payloads fail fast with
+ * {@link EventSchemaValidationException}.</p>
+ *
+ * <p><b>Transaction boundary:</b> no owned transaction. Methods are called by DB transaction paths
+ * (outbox enqueue) and Kafka transaction/consume paths.</p>
  */
 public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreatedEventSchemaRegistry {
 
-    public static final int SCHEMA_V1 = 1;
-    public static final int SCHEMA_V2 = 2;
+    private static final String SUBJECT = "ORDER_CREATED";
 
     private final ObjectMapper objectMapper;
     private final Counter validationErrors;
     private final MeterRegistry meterRegistry;
+    private final ExternalSchemaRegistryClient schemaRegistryClient;
 
     /**
      * Creates a schema registry backed by Jackson and Micrometer.
      * @param objectMapper serializer/deserializer for event payloads
      * @param meterRegistry metrics registry for schema counters
      */
-    public VersionedJsonOrderCreatedEventSchemaRegistry(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+    @Autowired
+    public VersionedJsonOrderCreatedEventSchemaRegistry(
+            ObjectMapper objectMapper,
+            MeterRegistry meterRegistry,
+            ExternalSchemaRegistryClient schemaRegistryClient) {
         this.objectMapper = objectMapper;
         this.meterRegistry = meterRegistry;
+        this.schemaRegistryClient = schemaRegistryClient;
         this.validationErrors = meterRegistry.counter("kafka.schema.validation.errors");
+    }
+
+    // Compatibility constructor used by unit tests that instantiate this directly.
+    public VersionedJsonOrderCreatedEventSchemaRegistry(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+        this(objectMapper, meterRegistry, new PropertyBackedSchemaRegistryClient(2, 1));
     }
 
     @Override
@@ -39,7 +59,7 @@ public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreate
      * @return operation result
      */
     public int latestSchemaVersion() {
-        return SCHEMA_V2;
+        return schemaRegistryClient.latestVersion(SUBJECT);
     }
 
     @Override
@@ -50,6 +70,7 @@ public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreate
      */
     public String serialize(OrderCreatedEvent event) {
         OrderCreatedEvent normalized = normalize(event);
+        schemaRegistryClient.assertWriterCompatible(SUBJECT, normalized.schemaVersion());
         validate(normalized);
         recordVersion(normalized.schemaVersion());
         try {
@@ -71,13 +92,14 @@ public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreate
             JsonNode root = objectMapper.readTree(payload);
             Integer schemaVersion = root.hasNonNull("schemaVersion")
                     ? root.get("schemaVersion").asInt()
-                    : SCHEMA_V1;
+                    : null;
             OrderCreatedEvent event = new OrderCreatedEvent(
-                    normalizeSchemaVersion(schemaVersion),
+                    schemaRegistryClient.normalizeIncomingVersion(SUBJECT, schemaVersion),
                     readRequired(root, "eventId"),
                     readRequired(root, "eventType"),
                     readRequired(root, "orderId"),
                     readRequired(root, "occurredAt"));
+            schemaRegistryClient.assertReaderCompatible(SUBJECT, event.schemaVersion());
             validate(event);
             recordVersion(event.schemaVersion());
             return event;
@@ -105,20 +127,11 @@ public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreate
 
     private OrderCreatedEvent normalize(OrderCreatedEvent event) {
         return new OrderCreatedEvent(
-                normalizeSchemaVersion(event.schemaVersion()),
+                schemaRegistryClient.normalizeIncomingVersion(SUBJECT, event.schemaVersion()),
                 event.eventId(),
                 event.eventType(),
                 event.orderId(),
                 event.occurredAt());
-    }
-
-    private int normalizeSchemaVersion(Integer schemaVersion) {
-        int version = schemaVersion == null ? SCHEMA_V1 : schemaVersion;
-        if (version <= 0) {
-            throw new EventSchemaValidationException("schemaVersion must be >= 1");
-        }
-        // Forward compatibility fallback: accept unknown future versions with latest parser rules.
-        return Math.min(version, latestSchemaVersion());
     }
 
     private String readRequired(JsonNode root, String field) {
@@ -139,7 +152,7 @@ public class VersionedJsonOrderCreatedEventSchemaRegistry implements OrderCreate
     }
 
     private void recordVersion(Integer version) {
-        String v = String.valueOf(version == null ? SCHEMA_V1 : version);
+        String v = String.valueOf(version == null ? latestSchemaVersion() : version);
         meterRegistry.counter(
                 "kafka.event.version.distribution",
                 "eventType", "ORDER_CREATED",

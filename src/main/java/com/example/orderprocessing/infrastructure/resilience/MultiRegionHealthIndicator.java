@@ -6,8 +6,13 @@ import org.springframework.stereotype.Component;
 
 @Component("multiRegion")
 /**
- * MultiRegionHealthIndicator implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Actuator health adapter exposing regional write-mode state.
+ *
+ * <p><b>Architecture role:</b> infrastructure adapter over {@link RegionalFailoverManager} for
+ * operator visibility and routing automation.</p>
+ *
+ * <p><b>Resilience context:</b> signals when write gating is active so control planes can steer
+ * writes away from passive or degraded regions.</p>
  */
 public class MultiRegionHealthIndicator implements HealthIndicator {
 

@@ -1,8 +1,13 @@
 package com.example.orderprocessing.application.exception;
 
 /**
- * InfrastructureException implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Infrastructure-failure signal surfaced to the interface layer.
+ *
+ * <p><b>Architecture role:</b> application-layer exception used when downstream dependencies are
+ * degraded (for example passive-region write gating or critical backpressure).</p>
+ *
+ * <p><b>Transaction boundary:</b> triggers rollback in transactional command flows and maps to
+ * HTTP {@code 503} through exception handlers.</p>
  */
 public class InfrastructureException extends RuntimeException {
     /**

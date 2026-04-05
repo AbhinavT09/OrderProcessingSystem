@@ -9,8 +9,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableRetry
 @EnableScheduling
 /**
- * OrderProcessingApplication implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Spring Boot entrypoint for the distributed order-processing service.
+ *
+ * <p><b>Runtime role:</b> boots application wiring, scheduled outbox workers, and retry
+ * infrastructure through {@code @EnableScheduling} and {@code @EnableRetry}.</p>
  */
 public class OrderProcessingApplication {
 

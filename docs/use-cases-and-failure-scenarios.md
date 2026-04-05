@@ -1,3 +1,8 @@
+---
+title: Use Cases and Failure Scenarios
+nav_order: 6
+---
+
 # Use Cases and Failure Cases
 
 This section documents practical end-to-end use cases for the Order Processing System.

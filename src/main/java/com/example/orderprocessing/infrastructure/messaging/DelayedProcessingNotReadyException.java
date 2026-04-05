@@ -1,8 +1,13 @@
 package com.example.orderprocessing.infrastructure.messaging;
 
 /**
- * DelayedProcessingNotReadyException implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Signal that an event is valid but not yet eligible for processing.
+ *
+ * <p><b>Architecture role:</b> infrastructure consumer exception that intentionally routes to
+ * retry-topic delays.</p>
+ *
+ * <p><b>Resilience context:</b> enables temporal decoupling without thread blocking; the consumer
+ * fails fast and lets Kafka retry scheduling re-drive the event.</p>
  */
 public class DelayedProcessingNotReadyException extends RuntimeException {
     /**

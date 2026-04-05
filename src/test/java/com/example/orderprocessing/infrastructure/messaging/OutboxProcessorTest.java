@@ -18,8 +18,10 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -37,17 +39,19 @@ class OutboxProcessorTest {
         TransactionTemplate tx = new TransactionTemplate(new NoOpTransactionManager());
         SimpleMeterRegistry meter = new SimpleMeterRegistry();
         OutboxProcessor processor = new OutboxProcessor(
-                publisher, repository, schemaRegistry, tx, retryHandler, meter, 30_000);
+                publisher, repository, schemaRegistry, tx, retryHandler, meter, 16);
 
         OutboxEntity event = outbox("order-1", OutboxStatus.PENDING);
+        event.setLeaseOwner("lease-1");
         OrderCreatedEvent parsed = new OrderCreatedEvent(2, "evt-1", "ORDER_CREATED", "order-1", Instant.now().toString());
         when(schemaRegistry.deserialize(any())).thenReturn(parsed);
         when(publisher.publishOrderCreated(any())).thenReturn(CompletableFuture.completedFuture(null));
+        when(repository.markSentIfLeased(eq(event.getId()), eq("lease-1"), eq(0L), any())).thenReturn(true);
 
-        processor.processBatch(List.of(event));
+        assertDoesNotThrow(() -> processor.processBatch(List.of(event)).exceptionally(ex -> null).join());
 
         assertEquals(OutboxStatus.SENT, event.getStatus());
-        verify(repository, times(2)).save(event); // leased + sent writes
+        verify(repository, times(1)).markSentIfLeased(eq(event.getId()), eq("lease-1"), eq(0L), any());
         verify(retryHandler, never()).handleFailure(any(), any());
     }
 
@@ -60,7 +64,7 @@ class OutboxProcessorTest {
         TransactionTemplate tx = new TransactionTemplate(new NoOpTransactionManager());
         SimpleMeterRegistry meter = new SimpleMeterRegistry();
         OutboxProcessor processor = new OutboxProcessor(
-                publisher, repository, schemaRegistry, tx, retryHandler, meter, 30_000);
+                publisher, repository, schemaRegistry, tx, retryHandler, meter, 16);
 
         OutboxEntity event = outbox("order-2", OutboxStatus.PENDING);
         when(schemaRegistry.deserialize(any())).thenReturn(
@@ -69,7 +73,7 @@ class OutboxProcessorTest {
         failed.completeExceptionally(new RuntimeException("kafka down"));
         when(publisher.publishOrderCreated(any())).thenReturn(failed);
 
-        processor.processBatch(List.of(event));
+        assertDoesNotThrow(() -> processor.processBatch(List.of(event)).exceptionally(ex -> null).join());
 
         verify(retryHandler).handleFailure(any(), any());
     }

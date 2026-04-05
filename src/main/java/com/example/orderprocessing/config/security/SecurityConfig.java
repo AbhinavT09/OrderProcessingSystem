@@ -26,8 +26,16 @@ import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
 /**
- * SecurityConfig implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Security and filter-chain wiring for the interface layer.
+ *
+ * <p><b>Architecture role:</b> infrastructure configuration that composes HTTP adapters
+ * (authentication, authorization, request context, and rate limiting).</p>
+ *
+ * <p><b>Idempotency and resilience context:</b> idempotency is enforced in application services,
+ * while this class enforces admission controls. Rate limiting acts as fail-open under Redis
+ * degradation to preserve API availability.</p>
+ *
+ * <p><b>Transaction boundary:</b> none. This class defines runtime security behavior only.</p>
  */
 public class SecurityConfig {
 

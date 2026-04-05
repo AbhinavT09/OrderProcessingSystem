@@ -99,6 +99,22 @@ public class OrderController {
         return orderQueryService.list(status);
     }
 
+    @GetMapping("/page")
+    /**
+     * Lists orders with bounded pagination for high-cardinality datasets.
+     *
+     * @param status optional status filter
+     * @param page zero-based page index
+     * @param size page size (capped server-side)
+     * @return paginated order payload and metadata
+     */
+    public OrderQueryService.PagedOrderResult listPage(
+            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        return orderQueryService.listPage(status, page, size);
+    }
+
     @PatchMapping("/{id}/cancel")
     /**
      * Requests cancellation of an order.

@@ -1,6 +1,6 @@
 package com.example.orderprocessing.infrastructure.resilience;
 
-import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
+import com.example.orderprocessing.application.port.OrderRecord;
 import com.example.orderprocessing.infrastructure.resilience.conflict.ConflictResolutionStrategy;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -42,7 +42,7 @@ public class RegionalConsistencyManager {
         return regionId;
     }
 
-    public boolean shouldApplyIncomingUpdate(OrderEntity current, String incomingRegionId, Instant incomingTimestamp, Long incomingVersion) {
+    public boolean shouldApplyIncomingUpdate(OrderRecord current, String incomingRegionId, Instant incomingTimestamp, Long incomingVersion) {
         boolean decision = conflictResolutionStrategy.shouldApplyIncomingUpdate(
                 current, incomingRegionId, incomingTimestamp, incomingVersion);
         if (!decision) {

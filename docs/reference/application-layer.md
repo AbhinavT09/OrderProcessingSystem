@@ -1,3 +1,9 @@
+---
+title: Application Layer
+parent: Reference
+nav_order: 2
+---
+
 # Application Layer Reference
 
 ## Layer Purpose
@@ -33,7 +39,7 @@ Application services orchestrate use-cases, transactions, and infrastructure por
 
 ## Ports
 
-- `OrderRepository`: order persistence contract
+- `OrderRepository`: order persistence contract over application snapshots (`OrderRecord`, `OrderItemRecord`) rather than infrastructure entities
 - `OutboxRepository`: outbox persistence/claim/archive contract
 - `ProcessedEventRepository`: consumer dedupe marker contract
 - `EventPublisher`: async integration event publication contract

@@ -1,8 +1,13 @@
 package com.example.orderprocessing.application.exception;
 
 /**
- * ConflictException implements a concrete responsibility in the order processing service.
- * It is used to keep the boots the Spring runtime for the service layer explicit and maintainable in this architecture.
+ * Domain/application conflict signal for rejected state transitions and concurrency races.
+ *
+ * <p><b>Architecture role:</b> application-layer exception translated by interface adapters into
+ * HTTP {@code 409} responses.</p>
+ *
+ * <p><b>Distributed-systems context:</b> used for optimistic-concurrency mismatches, duplicate
+ * in-progress idempotency keys, and conflict-policy rejections.</p>
  */
 public class ConflictException extends RuntimeException {
     /**

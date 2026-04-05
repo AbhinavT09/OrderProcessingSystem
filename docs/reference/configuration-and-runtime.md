@@ -1,3 +1,9 @@
+---
+title: Configuration and Runtime
+parent: Reference
+nav_order: 5
+---
+
 # Configuration and Runtime Controls
 
 ## Configuration Package Layout
@@ -73,6 +79,7 @@
 - `app.security.rate-limit.requests`
 - `app.security.rate-limit.window-ms`
 - `app.security.rate-limit.policy-cache-ttl-ms`
+- `app.query.list-max-rows`
 - `app.backpressure.poll-ms`
 - `app.backpressure.outbox.elevated-backlog`
 - `app.backpressure.outbox.critical-backlog`
@@ -90,6 +97,15 @@
 - delayed consumer processing settings influence order progression latency
 - `read_committed` consumer mode avoids uncommitted transactional records
 - backpressure thresholds directly impact write admission and dynamic throttling
+- `app.query.list-max-rows` bounds legacy list responses to avoid accidental full-result scans
+
+## Principal Hardening Properties
+
+| Property | Purpose | Default |
+|---|---|---|
+| `app.outbox.publisher.max-in-flight` | hard cap of concurrent async outbox publishes | `16` |
+| `app.outbox.publisher.parallelism` | partition worker parallelism | `8` |
+| `app.query.list-max-rows` | upper bound for legacy `/orders` list reads | `1000` |
 
 ## Runtime Control Feedback Loop
 
@@ -104,6 +120,13 @@ flowchart LR
     ARS --> ORH[OutboxRetryHandler]
     ARS --> OCC[OrderCreatedConsumer retry path]
 ```
+
+## Transaction Manager Boundaries
+
+- Write and read services explicitly bind to DB transaction manager:
+  - `OrderService`: `@Transactional(transactionManager = "transactionManager")`
+  - `OrderQueryService`: `@Transactional(transactionManager = "transactionManager", readOnly = true)`
+- This is required because Kafka transactional publishing introduces additional transaction managers and implicit selection can become ambiguous.
 
 ## Metrics Touchpoints
 

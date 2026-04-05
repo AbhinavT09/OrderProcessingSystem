@@ -1,10 +1,10 @@
 package com.example.orderprocessing.application.service;
 
 import com.example.orderprocessing.application.port.CacheProvider;
+import com.example.orderprocessing.application.port.OrderRecord;
 import com.example.orderprocessing.application.port.OrderRepository;
 import com.example.orderprocessing.domain.order.OrderStatus;
 import com.example.orderprocessing.infrastructure.crosscutting.GlobalIdempotencyService;
-import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
 import com.example.orderprocessing.infrastructure.resilience.RegionalConsistencyManager;
 import com.example.orderprocessing.interfaces.http.dto.CreateOrderRequest;
@@ -22,6 +22,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -172,52 +175,68 @@ class OrderServiceIdempotencyLifecycleTest {
     }
 
     private static final class InMemoryOrderRepository implements OrderRepository {
-        private final Map<UUID, OrderEntity> byId = new ConcurrentHashMap<>();
+        private final Map<UUID, OrderRecord> byId = new ConcurrentHashMap<>();
         private final Map<String, UUID> byIdempotencyKey = new ConcurrentHashMap<>();
 
         @Override
-        public synchronized OrderEntity save(OrderEntity order) {
-            if (order.getId() == null) {
-                order.setId(UUID.randomUUID());
+        public synchronized OrderRecord save(OrderRecord order) {
+            OrderRecord normalized = order;
+            if (order.id() == null || order.createdAt() == null || order.status() == null || order.version() == null) {
+                normalized = new OrderRecord(
+                        order.id() == null ? UUID.randomUUID() : order.id(),
+                        order.version() == null ? 0L : order.version(),
+                        order.status() == null ? OrderStatus.PENDING : order.status(),
+                        order.createdAt() == null ? Instant.now() : order.createdAt(),
+                        order.idempotencyKey(),
+                        order.regionId(),
+                        order.lastUpdatedTimestamp(),
+                        order.items());
             }
-            if (order.getCreatedAt() == null) {
-                order.setCreatedAt(Instant.now());
-            }
-            if (order.getStatus() == null) {
-                order.setStatus(OrderStatus.PENDING);
-            }
-            if (order.getVersion() == null) {
-                order.setVersion(0L);
-            }
-            String key = order.getIdempotencyKey();
+            String key = normalized.idempotencyKey();
             if (key != null) {
                 UUID existing = byIdempotencyKey.get(key);
-                if (existing != null && !existing.equals(order.getId())) {
+                if (existing != null && !existing.equals(normalized.id())) {
                     throw new DataIntegrityViolationException("duplicate idempotency key");
                 }
-                byIdempotencyKey.put(key, order.getId());
+                byIdempotencyKey.put(key, normalized.id());
             }
-            byId.put(order.getId(), order);
-            return order;
+            byId.put(normalized.id(), normalized);
+            return normalized;
         }
 
         @Override
-        public Optional<OrderEntity> findById(UUID id) {
+        public Optional<OrderRecord> findById(UUID id) {
             return Optional.ofNullable(byId.get(id));
         }
 
         @Override
-        public List<OrderEntity> findAll() {
+        public List<OrderRecord> findAll() {
             return new ArrayList<>(byId.values());
         }
 
         @Override
-        public List<OrderEntity> findByStatus(OrderStatus status) {
-            return byId.values().stream().filter(e -> status == e.getStatus()).toList();
+        public List<OrderRecord> findByStatus(OrderStatus status) {
+            return byId.values().stream().filter(e -> status == e.status()).toList();
         }
 
         @Override
-        public Optional<OrderEntity> findByIdempotencyKey(String idempotencyKey) {
+        public Page<OrderRecord> findAll(Pageable pageable) {
+            List<OrderRecord> all = findAll();
+            int start = (int) Math.min((long) pageable.getPageNumber() * pageable.getPageSize(), all.size());
+            int end = Math.min(start + pageable.getPageSize(), all.size());
+            return new PageImpl<>(all.subList(start, end), pageable, all.size());
+        }
+
+        @Override
+        public Page<OrderRecord> findByStatus(OrderStatus status, Pageable pageable) {
+            List<OrderRecord> filtered = findByStatus(status);
+            int start = (int) Math.min((long) pageable.getPageNumber() * pageable.getPageSize(), filtered.size());
+            int end = Math.min(start + pageable.getPageSize(), filtered.size());
+            return new PageImpl<>(filtered.subList(start, end), pageable, filtered.size());
+        }
+
+        @Override
+        public Optional<OrderRecord> findByIdempotencyKey(String idempotencyKey) {
             UUID id = byIdempotencyKey.get(idempotencyKey);
             return id == null ? Optional.empty() : findById(id);
         }

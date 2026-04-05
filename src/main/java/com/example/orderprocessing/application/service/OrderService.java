@@ -7,11 +7,12 @@ import com.example.orderprocessing.application.exception.ConflictException;
 import com.example.orderprocessing.application.exception.InfrastructureException;
 import com.example.orderprocessing.application.exception.NotFoundException;
 import com.example.orderprocessing.application.port.CacheProvider;
+import com.example.orderprocessing.application.port.OrderItemRecord;
+import com.example.orderprocessing.application.port.OrderRecord;
 import com.example.orderprocessing.application.port.OrderRepository;
 import com.example.orderprocessing.domain.order.Order;
 import com.example.orderprocessing.domain.order.OrderStatus;
 import com.example.orderprocessing.infrastructure.crosscutting.GlobalIdempotencyService;
-import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
 import com.example.orderprocessing.infrastructure.resilience.RegionalConsistencyManager;
 import io.micrometer.core.instrument.Counter;
@@ -125,11 +126,11 @@ public class OrderService {
                         globalIdempotencyService.resolveState(normalizedIdempotencyKey);
 
                 if (state.hasCompletedOrder()) {
-                    OrderEntity existingGlobal = orderRepository.findById(state.orderId()).orElse(null);
+                    OrderRecord existingGlobal = orderRepository.findById(state.orderId()).orElse(null);
                     if (existingGlobal != null) {
                         idempotentHitCounter.increment();
                         log.info("Global idempotency COMPLETED reuse key={} orderId={}",
-                                normalizedIdempotencyKey, existingGlobal.getId());
+                                normalizedIdempotencyKey, existingGlobal.id());
                         return mapper.toResponse(mapper.toDomain(existingGlobal));
                     }
                 }
@@ -152,11 +153,11 @@ public class OrderService {
             }
 
             if (normalizedIdempotencyKey != null) {
-                OrderEntity existing = orderRepository.findByIdempotencyKey(normalizedIdempotencyKey).orElse(null);
+                OrderRecord existing = orderRepository.findByIdempotencyKey(normalizedIdempotencyKey).orElse(null);
                 if (existing != null) {
                     idempotentHitCounter.increment();
-                    log.info("Idempotent order create hit key={} orderId={}", normalizedIdempotencyKey, existing.getId());
-                    globalIdempotencyService.markCompleted(normalizedIdempotencyKey, existing.getId());
+                    log.info("Idempotent order create hit key={} orderId={}", normalizedIdempotencyKey, existing.id());
+                    globalIdempotencyService.markCompleted(normalizedIdempotencyKey, existing.id());
                     return mapper.toResponse(mapper.toDomain(existing));
                 }
             }
@@ -164,35 +165,33 @@ public class OrderService {
             Order order = Order.create(mapper.toDomainItems(request.items()), normalizedIdempotencyKey);
 
             try {
-                OrderEntity toSave = mapper.toEntity(order);
-                stampRegionMetadata(toSave, null);
-                OrderEntity saved = orderRepository.save(toSave);
-                MDC.put("order_id", saved.getId().toString());
+                OrderRecord toSave = stampRegionMetadata(order, null);
+                OrderRecord saved = orderRepository.save(toSave);
+                MDC.put("order_id", saved.id().toString());
 
                 OrderCreatedEvent createdEvent = new OrderCreatedEvent(
-                        2,
                         UUID.randomUUID().toString(),
                         "ORDER_CREATED",
-                        saved.getId().toString(),
+                        saved.id().toString(),
                         Instant.now().toString());
-                outboxService.enqueueOrderCreated(saved.getId().toString(), createdEvent);
+                outboxService.enqueueOrderCreated(saved.id().toString(), createdEvent);
                 invalidateStatusCaches();
-                markGlobalIdempotencyCompletedAfterCommit(normalizedIdempotencyKey, saved.getId());
+                markGlobalIdempotencyCompletedAfterCommit(normalizedIdempotencyKey, saved.id());
 
                 createCounter.increment();
                 log.info("Order created orderId={} status={} idempotencyKey={}",
-                        saved.getId(), saved.getStatus(), normalizedIdempotencyKey);
+                        saved.id(), saved.status(), normalizedIdempotencyKey);
                 return mapper.toResponse(mapper.toDomain(saved));
             } catch (DataIntegrityViolationException ex) {
                 if (normalizedIdempotencyKey == null) {
                     failureCounter.increment();
                     throw new ConflictException("Order create conflict");
                 }
-                OrderEntity existing = orderRepository.findByIdempotencyKey(normalizedIdempotencyKey)
+                OrderRecord existing = orderRepository.findByIdempotencyKey(normalizedIdempotencyKey)
                         .orElseThrow(() -> new ConflictException("Idempotency conflict while creating order"));
                 idempotentHitCounter.increment();
-                globalIdempotencyService.markCompleted(normalizedIdempotencyKey, existing.getId());
-                log.warn("Order create deduped after race key={} orderId={}", normalizedIdempotencyKey, existing.getId());
+                globalIdempotencyService.markCompleted(normalizedIdempotencyKey, existing.id());
+                log.warn("Order create deduped after race key={} orderId={}", normalizedIdempotencyKey, existing.id());
                 return mapper.toResponse(mapper.toDomain(existing));
             } finally {
                 MDC.remove("order_id");
@@ -221,18 +220,17 @@ public class OrderService {
                 int attempts = 0;
                 while (attempts < 2) {
                     attempts++;
-                    OrderEntity entity = findEntity(id);
-                    checkExpectedVersion(expectedVersion, entity.getVersion(), id);
+                    OrderRecord entity = findEntity(id);
+                    checkExpectedVersion(expectedVersion, entity.version(), id);
                     Order order = mapper.toDomain(entity);
                     OrderStatus previous = order.getStatus();
                     order.updateStatus(status);
                     try {
-                        OrderEntity toSave = mapper.toEntity(order);
-                        stampRegionMetadata(toSave, entity);
-                        OrderEntity saved = orderRepository.save(toSave);
-                        invalidateOrderCaches(saved.getId());
+                        OrderRecord toSave = stampRegionMetadata(order, entity);
+                        OrderRecord saved = orderRepository.save(toSave);
+                        invalidateOrderCaches(saved.id());
                         log.info("Order status updated orderId={} from={} to={} version={}",
-                                id, previous, status, saved.getVersion());
+                                id, previous, status, saved.version());
                         return mapper.toResponse(mapper.toDomain(saved));
                     } catch (ObjectOptimisticLockingFailureException ex) {
                         if (attempts >= 2) {
@@ -267,22 +265,21 @@ public class OrderService {
                 int attempts = 0;
                 while (attempts < 2) {
                     attempts++;
-                    OrderEntity existing = findEntity(id);
+                    OrderRecord existing = findEntity(id);
                     Order order = mapper.toDomain(existing);
                     if (!regionalConsistencyManager.shouldApplyIncomingUpdate(
                             existing,
                             regionalConsistencyManager.regionId(),
                             Instant.now(),
-                            existing.getVersion())) {
+                            existing.version())) {
                         throw new ConflictException("Order update rejected due to regional conflict");
                     }
                     order.cancel();
                     try {
-                        OrderEntity toSave = mapper.toEntity(order);
-                        stampRegionMetadata(toSave, existing);
-                        OrderEntity saved = orderRepository.save(toSave);
-                        invalidateOrderCaches(saved.getId());
-                        log.info("Order cancelled orderId={} version={}", id, saved.getVersion());
+                        OrderRecord toSave = stampRegionMetadata(order, existing);
+                        OrderRecord saved = orderRepository.save(toSave);
+                        invalidateOrderCaches(saved.id());
+                        log.info("Order cancelled orderId={} version={}", id, saved.version());
                         return mapper.toResponse(mapper.toDomain(saved));
                     } catch (ObjectOptimisticLockingFailureException ex) {
                         if (attempts >= 2) {
@@ -298,7 +295,7 @@ public class OrderService {
         });
     }
 
-    private OrderEntity findEntity(UUID id) {
+    private OrderRecord findEntity(UUID id) {
         return orderRepository.findById(id).orElseThrow(() -> new NotFoundException("Order not found: " + id));
     }
 
@@ -340,12 +337,22 @@ public class OrderService {
         }
     }
 
-    private void stampRegionMetadata(OrderEntity target, OrderEntity previous) {
-        target.setRegionId(regionalConsistencyManager.regionId());
-        if (previous != null && previous.getVersion() != null && target.getVersion() == null) {
-            target.setVersion(previous.getVersion());
+    private OrderRecord stampRegionMetadata(Order target, OrderRecord previous) {
+        Long version = target.getVersion();
+        if (previous != null && previous.version() != null && version == null) {
+            version = previous.version();
         }
-        target.setLastUpdatedTimestamp(Instant.now());
+        return new OrderRecord(
+                target.getId(),
+                version,
+                target.getStatus(),
+                target.getCreatedAt(),
+                target.getIdempotencyKey(),
+                regionalConsistencyManager.regionId(),
+                Instant.now(),
+                target.getItems().stream()
+                        .map(item -> new OrderItemRecord(item.productName(), item.quantity(), item.price()))
+                        .toList());
     }
 
     private void markGlobalIdempotencyCompletedAfterCommit(String idempotencyKey, UUID orderId) {

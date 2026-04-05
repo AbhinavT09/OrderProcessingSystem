@@ -1,4 +1,12 @@
 title: Order Processing System Docs
 description: Architecture and implementation guide
 markdown: kramdown
-theme: minima
+remote_theme: just-the-docs/just-the-docs
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+
+nav_external_links:
+  - title: GitHub Repository
+    url: https://github.com/
+    hide_icon: false

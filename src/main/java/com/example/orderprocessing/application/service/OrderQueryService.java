@@ -3,16 +3,20 @@ package com.example.orderprocessing.application.service;
 import com.example.orderprocessing.interfaces.http.dto.OrderResponse;
 import com.example.orderprocessing.application.exception.NotFoundException;
 import com.example.orderprocessing.application.port.CacheProvider;
+import com.example.orderprocessing.application.port.OrderRecord;
 import com.example.orderprocessing.application.port.OrderRepository;
 import com.example.orderprocessing.domain.order.OrderStatus;
-import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Timer;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,10 +34,13 @@ public class OrderQueryService {
     private final CacheProvider cacheProvider;
     private final OrderMapper mapper;
     private final Timer queryTimer;
+    private final Timer dbQueryTimer;
     private final Counter requestCounter;
     private final Counter errorCounter;
     private final Duration orderByIdTtl;
     private final Duration orderListTtl;
+    private final int listMaxRows;
+    private final ObservationRegistry observationRegistry;
     private final ConcurrentHashMap<String, Object> keyLocks = new ConcurrentHashMap<>();
 
     /**
@@ -46,16 +53,24 @@ public class OrderQueryService {
                              CacheProvider cacheProvider,
                              OrderMapper mapper,
                              MeterRegistry meterRegistry,
+                             ObservationRegistry observationRegistry,
                              @Value("${app.cache.ttl.order-by-id-seconds:300}") long orderByIdTtlSeconds,
-                             @Value("${app.cache.ttl.order-list-seconds:60}") long orderListTtlSeconds) {
+                             @Value("${app.cache.ttl.order-list-seconds:60}") long orderListTtlSeconds,
+                             @Value("${app.query.list-max-rows:1000}") int listMaxRows) {
         this.orderRepository = orderRepository;
         this.cacheProvider = cacheProvider;
         this.mapper = mapper;
+        this.observationRegistry = observationRegistry;
         this.queryTimer = meterRegistry.timer("orders.query.duration");
+        this.dbQueryTimer = Timer.builder("db.query.duration")
+                .description("Repository query latency (exemplar-enabled with active trace context)")
+                .publishPercentileHistogram(true)
+                .register(meterRegistry);
         this.requestCounter = meterRegistry.counter("orders.query.request.count");
         this.errorCounter = meterRegistry.counter("orders.query.error.count");
         this.orderByIdTtl = Duration.ofSeconds(orderByIdTtlSeconds);
         this.orderListTtl = Duration.ofSeconds(orderListTtlSeconds);
+        this.listMaxRows = Math.max(1, listMaxRows);
     }
 
     @Transactional(transactionManager = "transactionManager", readOnly = true)
@@ -104,7 +119,11 @@ public class OrderQueryService {
                 return cacheProvider.get(key, CachedOrderList.class)
                         .map(CachedOrderList::orders)
                         .orElseGet(() -> coalescedStatusLoad(key, () -> {
-                            List<OrderEntity> orders = status == null ? orderRepository.findAll() : orderRepository.findByStatus(status);
+                            var pageable = PageRequest.of(0, listMaxRows, Sort.by("createdAt").ascending());
+                            var page = recordDbQuery("orders.list", () -> status == null
+                                    ? orderRepository.findAll(pageable)
+                                    : orderRepository.findByStatus(status, pageable));
+                            List<OrderRecord> orders = page.getContent();
                             List<OrderResponse> loaded = orders.stream().map(mapper::toDomain).map(mapper::toResponse).toList();
                             cacheProvider.put(key, new CachedOrderList(loaded), orderListTtl);
                             return loaded;
@@ -116,8 +135,54 @@ public class OrderQueryService {
         });
     }
 
-    private OrderEntity findEntity(UUID id) {
-        return orderRepository.findById(id).orElseThrow(() -> new NotFoundException("Order not found: " + id));
+    @Transactional(transactionManager = "transactionManager", readOnly = true)
+    public PagedOrderResult listPage(OrderStatus status, int page, int size) {
+        requestCounter.increment();
+        return queryTimer.record(() -> {
+            try {
+                int normalizedPage = Math.max(0, page);
+                int normalizedSize = Math.min(500, Math.max(1, size));
+                var pageable = PageRequest.of(normalizedPage, normalizedSize, Sort.by("createdAt").ascending());
+                var results = recordDbQuery("orders.list.page", () -> status == null
+                        ? orderRepository.findAll(pageable)
+                        : orderRepository.findByStatus(status, pageable));
+                List<OrderResponse> orders = results.getContent().stream()
+                        .map(mapper::toDomain)
+                        .map(mapper::toResponse)
+                        .toList();
+                return new PagedOrderResult(
+                        orders,
+                        results.getNumber(),
+                        results.getSize(),
+                        results.getTotalElements(),
+                        results.getTotalPages());
+            } catch (RuntimeException ex) {
+                errorCounter.increment();
+                throw ex;
+            }
+        });
+    }
+
+    private OrderRecord findEntity(UUID id) {
+        return recordDbQuery("orders.getById",
+                () -> orderRepository.findById(id).orElseThrow(() -> new NotFoundException("Order not found: " + id)));
+    }
+
+    private <T> T recordDbQuery(String operation, java.util.function.Supplier<T> supplier) {
+        Observation observation = Observation.start("db.query.duration", observationRegistry)
+                .lowCardinalityKeyValue("operation", operation);
+        Timer.Sample sample = Timer.start();
+        try (Observation.Scope scope = observation.openScope()) {
+            T result = supplier.get();
+            sample.stop(dbQueryTimer);
+            observation.stop();
+            return result;
+        } catch (RuntimeException ex) {
+            sample.stop(dbQueryTimer);
+            observation.error(ex);
+            observation.stop();
+            throw ex;
+        }
     }
 
     private OrderResponse coalescedOrderLoad(String key, java.util.function.Supplier<OrderResponse> loader) {
@@ -156,5 +221,13 @@ public class OrderQueryService {
 
     private String statusCacheKey(OrderStatus status) {
         return "orders:status:" + (status == null ? "ALL" : status.name());
+    }
+
+    public record PagedOrderResult(
+            List<OrderResponse> orders,
+            int page,
+            int size,
+            long totalElements,
+            int totalPages) {
     }
 }

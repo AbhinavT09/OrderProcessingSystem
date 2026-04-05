@@ -1,16 +1,23 @@
 package com.example.orderprocessing.application.port;
 
 import com.example.orderprocessing.domain.order.OrderStatus;
-import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 /**
- * Application port for order persistence operations.
+ * Hexagonal application port for order persistence operations.
  *
  * <p>Decouples application/domain services from concrete storage technology while exposing
  * query capabilities needed by command and read services.</p>
+ *
+ * <p><b>Idempotency context:</b> {@link #findByIdempotencyKey(String)} is used by write-side
+ * orchestration to guarantee that repeated create requests resolve to the same aggregate.</p>
+ *
+ * <p><b>Transactional context:</b> implementations are invoked inside service-level DB
+ * transactions. This port does not include Kafka side effects.</p>
  */
 public interface OrderRepository {
     /**
@@ -19,32 +26,47 @@ public interface OrderRepository {
      * @param order entity representation of current aggregate state
      * @return persisted entity (including generated/updated persistence fields)
      */
-    OrderEntity save(OrderEntity order);
+    OrderRecord save(OrderRecord order);
     /**
      * Loads an order by identifier.
      *
      * @param id order identifier
      * @return matching entity when present
      */
-    Optional<OrderEntity> findById(UUID id);
+    Optional<OrderRecord> findById(UUID id);
     /**
      * Lists all persisted orders.
      *
      * @return all order entities
      */
-    List<OrderEntity> findAll();
+    List<OrderRecord> findAll();
     /**
      * Lists orders by status.
      *
      * @param status status filter
      * @return entities matching requested status
      */
-    List<OrderEntity> findByStatus(OrderStatus status);
+    List<OrderRecord> findByStatus(OrderStatus status);
+    /**
+     * Reads one bounded page of orders.
+     *
+     * @param pageable page and size constraints
+     * @return page of order entities
+     */
+    Page<OrderRecord> findAll(Pageable pageable);
+    /**
+     * Reads one bounded page of orders by status.
+     *
+     * @param status status filter
+     * @param pageable page and size constraints
+     * @return page of order entities matching status
+     */
+    Page<OrderRecord> findByStatus(OrderStatus status, Pageable pageable);
     /**
      * Resolves order previously created for an idempotency key.
      *
      * @param idempotencyKey external request idempotency key
      * @return matching order when key has a stored mapping
      */
-    Optional<OrderEntity> findByIdempotencyKey(String idempotencyKey);
+    Optional<OrderRecord> findByIdempotencyKey(String idempotencyKey);
 }

@@ -5,6 +5,8 @@ import com.example.orderprocessing.infrastructure.persistence.entity.OrderEntity
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
@@ -21,6 +23,14 @@ public interface SpringOrderJpaRepository extends JpaRepository<OrderEntity, UUI
      * @return ordered matching orders
      */
     List<OrderEntity> findByStatusOrderByCreatedAtAsc(OrderStatus status);
+    /**
+     * Reads one page of orders by status.
+     *
+     * @param status status filter
+     * @param pageable page and size constraints
+     * @return bounded result page
+     */
+    Page<OrderEntity> findByStatus(OrderStatus status, Pageable pageable);
     /**
      * Finds an order by persisted idempotency key.
      *

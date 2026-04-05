@@ -1,3 +1,9 @@
+---
+title: API Layer
+parent: Reference
+nav_order: 1
+---
+
 # Interface HTTP Layer Reference
 
 ## Package Location
@@ -40,6 +46,25 @@
 
 - `OrderResponse`: id, status, created time, item list
 - `ApiError`: standardized error envelope (`code`, `message`, `requestId`, `timestamp`)
+
+## DTO-to-Domain Mapping Rules
+
+Interface DTOs are intentionally thin; all invariants are enforced in domain/application layers.
+
+| Interface DTO | Mapped Domain Concept | Rule Source | Notes |
+|---|---|---|---|
+| `CreateOrderRequest` | `Order.create(items, idempotencyKey)` | `domain/order/Order` | Creation always starts in `PENDING`; idempotency key is carried into aggregate snapshot |
+| `OrderItemRequest` | `OrderItem` value object | `domain/order/OrderItem` | Quantity/price shape validated at API boundary; business transitions validated in state objects |
+| `UpdateOrderStatusRequest.status` | `Order.updateStatus(status)` | `domain/order/state/*` | Illegal transitions throw `ConflictException` |
+| `UpdateOrderStatusRequest.version` | optimistic concurrency token | `OrderService.checkExpectedVersion(...)` | Enforces compare-and-set semantics before mutation |
+| `OrderResponse.status` | aggregate lifecycle state | `OrderStateFactory` + concrete states | Read model reflects eventual consistency from async consume path |
+
+### Why this mapping exists
+
+- Keeps transport contracts stable while domain logic evolves.
+- Prevents controller-layer duplication of domain transition rules.
+- Makes optimistic concurrency explicit at the API boundary.
+- Reduces misinterpretation between "validation error" and "state conflict" failure modes.
 
 ### Exception Mapping (`GlobalExceptionHandler`)
 
