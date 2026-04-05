@@ -1,1 +1,4 @@
 target/
+.sass-cache/
+_site/
+docs/_site/
