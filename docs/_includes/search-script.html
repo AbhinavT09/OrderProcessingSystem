@@ -1,0 +1,50 @@
+<script>
+  document.addEventListener("DOMContentLoaded", async function () {
+    const input = document.getElementById("search-input");
+    const resultsEl = document.getElementById("search-results");
+    if (!input || !resultsEl) return;
+
+    let index = null;
+    let docs = [];
+
+    try {
+      const response = await fetch("{{ '/search.json' | relative_url }}");
+      docs = await response.json();
+      index = lunr(function () {
+        this.ref("url");
+        this.field("title", { boost: 10 });
+        this.field("content");
+        docs.forEach((d) => this.add(d));
+      });
+    } catch (_) {
+      return;
+    }
+
+    function render(query) {
+      if (!query.trim()) {
+        resultsEl.classList.add("hidden");
+        resultsEl.innerHTML = "";
+        return;
+      }
+      const hits = index.search(query + "*").slice(0, 8);
+      if (!hits.length) {
+        resultsEl.classList.remove("hidden");
+        resultsEl.innerHTML = '<div class="search-no-results">No results</div>';
+        return;
+      }
+      resultsEl.classList.remove("hidden");
+      resultsEl.innerHTML = hits
+        .map((h) => docs.find((d) => d.url === h.ref))
+        .filter(Boolean)
+        .map((d) => `<a class="search-result-item" href="${d.url}"><div class="search-result-title">${d.title}</div></a>`)
+        .join("");
+    }
+
+    input.addEventListener("input", (e) => render(e.target.value));
+    document.addEventListener("click", (e) => {
+      if (!resultsEl.contains(e.target) && e.target !== input) {
+        resultsEl.classList.add("hidden");
+      }
+    });
+  });
+</script>

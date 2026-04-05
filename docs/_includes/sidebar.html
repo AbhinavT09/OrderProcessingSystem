@@ -1,0 +1,24 @@
+<aside class="sidebar" id="sidebar">
+  <nav class="sidebar-nav">
+    <ul class="sidebar-menu">
+      {% assign nav_pages = site.pages | where_exp: "p", "p.title and p.nav_order" | sort: "nav_order" %}
+      {% for item in nav_pages %}
+        {% if item.parent == nil %}
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="{{ item.url | relative_url }}">{{ item.title }}</a>
+            {% assign children = nav_pages | where: "parent", item.title %}
+            {% if children.size > 0 %}
+              <ul class="sidebar-submenu">
+                {% for child in children %}
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="{{ child.url | relative_url }}">{{ child.title }}</a>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </li>
+        {% endif %}
+      {% endfor %}
+    </ul>
+  </nav>
+</aside>
