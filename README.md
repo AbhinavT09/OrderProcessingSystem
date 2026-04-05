@@ -75,12 +75,9 @@ Client -> Interface HTTP -> Application Services -> Domain Aggregate/State
                     Infrastructure (JPA, Redis, Kafka, Resilience)
 ```
 
-Detailed architecture and diagrams: [docs/index.md](./docs/index.md)
-
 ## GitHub Pages Documentation
 
 - Live docs URL: [https://abhinavt09.github.io/OrderProcessingSystem/](https://abhinavt09.github.io/OrderProcessingSystem/)
-- If Pages is not yet active, enable it in **Settings -> Pages** with **Source = GitHub Actions**.
 
 ## Technology Stack
 
@@ -145,17 +142,6 @@ Key runtime areas (see full reference in docs):
 - cache TTL and Redis resilience controls
 - multi-region failover thresholds and idempotency TTL settings
 
-Full config reference: [docs/reference/configuration-and-runtime.md](./docs/reference/configuration-and-runtime.md)
-
 ## Testing and Quality
 
 Current coverage includes domain transitions, idempotency lifecycle scenarios, outbox messaging components, cache/rate-limit behavior, failover controls, and API integration paths.
-
-See details: [docs/testing-and-quality.md](./docs/testing-and-quality.md)
-
-## Documentation Index
-
-- Main docs index: [docs/index.md](./docs/index.md)
-- Design and architecture: [docs/design-and-architecture.md](./docs/design-and-architecture.md)
-- Layer references: [docs/reference/index.md](./docs/reference/index.md)
-- Operations and observability: [docs/observability-and-operations.md](./docs/observability-and-operations.md)

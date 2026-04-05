@@ -3,15 +3,22 @@ name: Deploy Docs
 on:
   push:
     branches:
+      - docs
       - main
     paths:
       - docs/**
+      - _config.yml
+      - docs/_config.yml
       - .github/workflows/pages.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   build:
@@ -30,4 +37,4 @@ jobs:
     needs: build
     environment: github-pages
     steps:
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5

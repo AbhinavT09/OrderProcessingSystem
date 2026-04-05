@@ -1,0 +1,99 @@
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ page.title | default: site.title }}</title>
+  <meta name="description" content="{{ page.description | default: site.description }}" />
+  <meta name="theme-color" content="#2e8555" />
+  <link rel="stylesheet" href="{{ '/assets/css/custom.css' | relative_url }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lunr/lunr.min.js"></script>
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem("eat-theme");
+      const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      let currentTheme = savedTheme || (systemPrefersDark ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", currentTheme);
+
+      function updateThemeColor(theme) {
+        const themeColor = theme === "dark" ? "#1b1b1d" : "#2e8555";
+        const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+        if (metaThemeColor) metaThemeColor.setAttribute("content", themeColor);
+      }
+
+      function initThemeToggle() {
+        const themeToggle = document.getElementById("theme-toggle");
+        const themeIcon = document.querySelector(".theme-toggle-icon");
+        if (!themeToggle || !themeIcon) return;
+
+        const updateIcon = (theme) => {
+          themeIcon.textContent = theme === "dark" ? "☀️" : "🌙";
+        };
+
+        updateIcon(currentTheme);
+        themeToggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          const newTheme = currentTheme === "dark" ? "light" : "dark";
+          currentTheme = newTheme;
+          document.documentElement.setAttribute("data-theme", newTheme);
+          localStorage.setItem("eat-theme", newTheme);
+          updateThemeColor(newTheme);
+          updateIcon(newTheme);
+        });
+      }
+
+      updateThemeColor(currentTheme);
+      document.addEventListener("DOMContentLoaded", initThemeToggle);
+      initThemeToggle();
+    })();
+  </script>
+  <script src="{{ '/assets/js/mermaid.min.js' | relative_url }}"></script>
+  <script>
+    if (!window.mermaid) {
+      const fallbackScript = document.createElement("script");
+      fallbackScript.src = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
+      document.head.appendChild(fallbackScript);
+    }
+  </script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      if (!window.mermaid) return;
+
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "loose",
+        theme: "default"
+      });
+
+      const codeBlocks = document.querySelectorAll(
+        "pre code.language-mermaid, pre code.lang-mermaid, pre code.mermaid, code.language-mermaid"
+      );
+
+      codeBlocks.forEach((code) => {
+        const source = code.textContent || "";
+        if (!source.trim()) return;
+        const container = document.createElement("div");
+        container.className = "mermaid";
+        container.textContent = source;
+
+        const pre = code.closest("pre");
+        if (pre) {
+          pre.replaceWith(container);
+        } else {
+          code.replaceWith(container);
+        }
+      });
+
+      const targets = document.querySelectorAll(".mermaid");
+      if (!targets.length) return;
+
+      if (typeof mermaid.run === "function") {
+        mermaid.run({ nodes: targets });
+      } else if (typeof mermaid.init === "function") {
+        mermaid.init(undefined, targets);
+      }
+    });
+  </script>
+</head>

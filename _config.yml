@@ -1,10 +1,19 @@
 title: Order Processing System Docs
 description: Architecture and implementation guide
+
+# Build from docs folder even when Pages is configured for branch/root builds.
+source: docs
+destination: _site
+
 markdown: kramdown
 remote_theme: just-the-docs/just-the-docs
+
+plugins:
+  - jekyll-remote-theme
+
 color_scheme: light
-search_button: true
 search_enabled: true
+search_button: true
 search:
   heading_level: 2
   previews: 3
@@ -12,6 +21,7 @@ search:
   preview_words_after: 15
   tokenizer_separator: /[\s/]+/
   rel_url: true
+
 heading_anchors: true
 permalink: pretty
 back_to_top: true
@@ -24,7 +34,7 @@ custom_css:
 
 aux_links:
   "View Repository":
-    - "https://github.com/"
+    - "https://github.com/AbhinavT09/OrderProcessingSystem"
 
 nav_sort: case_insensitive
 nav_fold: true
@@ -38,7 +48,7 @@ kramdown:
 
 nav_external_links:
   - title: GitHub Repository
-    url: https://github.com/
+    url: https://github.com/AbhinavT09/OrderProcessingSystem
     hide_icon: false
 
 defaults:
