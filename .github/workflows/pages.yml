@@ -3,10 +3,14 @@ name: Deploy Docs
 on:
   push:
     branches:
+      - docs
       - main
     paths:
       - docs/**
+      - _config.yml
+      - docs/_config.yml
       - .github/workflows/pages.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,4 +34,4 @@ jobs:
     needs: build
     environment: github-pages
     steps:
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
