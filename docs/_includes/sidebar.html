@@ -1,17 +1,28 @@
 <aside class="sidebar" id="sidebar">
   <nav class="sidebar-nav">
     <ul class="sidebar-menu">
+      {% assign current_url = page.url | relative_url %}
       {% assign nav_pages = site.pages | sort: "nav_order" %}
       {% for item in nav_pages %}
         {% if item.title and item.nav_order and item.parent == nil %}
+          {% assign item_url = item.url | relative_url %}
+          {% assign item_active = false %}
+          {% if current_url == item_url %}
+            {% assign item_active = true %}
+          {% endif %}
           <li class="sidebar-item">
-            <a class="sidebar-link" href="{{ item.url | relative_url }}">{{ item.title }}</a>
+            <a class="sidebar-link{% if item_active %} active{% endif %}" href="{{ item_url }}">{{ item.title }}</a>
             {% assign children = nav_pages | where: "parent", item.title %}
             {% if children.size > 0 %}
               <ul class="sidebar-submenu">
                 {% for child in children %}
+                  {% assign child_url = child.url | relative_url %}
+                  {% assign child_active = false %}
+                  {% if current_url == child_url %}
+                    {% assign child_active = true %}
+                  {% endif %}
                   <li class="sidebar-subitem">
-                    <a class="sidebar-sublink" href="{{ child.url | relative_url }}">{{ child.title }}</a>
+                    <a class="sidebar-sublink{% if child_active %} active{% endif %}" href="{{ child_url }}">{{ child.title }}</a>
                   </li>
                 {% endfor %}
               </ul>

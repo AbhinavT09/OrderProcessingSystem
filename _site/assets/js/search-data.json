@@ -1,0 +1,786 @@
+{"0": {
+    "doc": "API Layer",
+    "title": "Interface HTTP Layer Reference",
+    "content": " ",
+    "url": "/reference/api-layer/#interface-http-layer-reference",
+    
+    "relUrl": "/reference/api-layer/#interface-http-layer-reference"
+  },"1": {
+    "doc": "API Layer",
+    "title": "Package Location",
+    "content": "src/main/java/com/example/orderprocessing/interfaces/http . ",
+    "url": "/reference/api-layer/#package-location",
+    
+    "relUrl": "/reference/api-layer/#package-location"
+  },"2": {
+    "doc": "API Layer",
+    "title": "Controllers",
+    "content": "OrderController . Endpoints . | POST /orders . | Inputs: CreateOrderRequest, optional X-Idempotency-Key | Delegates to: OrderService.createOrder(...) | Notes: repeated key may return completed order or conflict on in-progress duplicate | . | GET /orders/{id} . | Delegates to: OrderQueryService.getById(...) | Notes: returns not-found when id does not exist | . | GET /orders?status=&lt;STATUS&gt; . | Delegates to: OrderQueryService.list(...) | Notes: missing status means unfiltered list | . | PATCH /orders/{id}/status . | Inputs: UpdateOrderStatusRequest(status, version) | Delegates to: OrderService.updateStatus(...) | Notes: optimistic version conflict returns 409 | . | PATCH /orders/{id}/cancel . | Delegates to: OrderService.cancel(...) | Notes: cancellation allowed only for valid domain states | . | . ",
+    "url": "/reference/api-layer/#controllers",
+    
+    "relUrl": "/reference/api-layer/#controllers"
+  },"3": {
+    "doc": "API Layer",
+    "title": "DTO and Error Contracts",
+    "content": "Request DTOs . | CreateOrderRequest: non-empty item collection | OrderItemRequest: product/quantity/price validation contract | UpdateOrderStatusRequest: target status + expected version for optimistic concurrency | . Response DTOs . | OrderResponse: id, status, created time, item list | ApiError: standardized error envelope (code, message, requestId, timestamp) | . ",
+    "url": "/reference/api-layer/#dto-and-error-contracts",
+    
+    "relUrl": "/reference/api-layer/#dto-and-error-contracts"
+  },"4": {
+    "doc": "API Layer",
+    "title": "DTO-to-Domain Mapping Rules",
+    "content": "Interface DTOs are intentionally thin; all invariants are enforced in domain/application layers. | Interface DTO | Mapped Domain Concept | Rule Source | Notes | . | CreateOrderRequest | Order.create(items, idempotencyKey) | domain/order/Order | Creation always starts in PENDING; idempotency key is carried into aggregate snapshot | . | OrderItemRequest | OrderItem value object | domain/order/OrderItem | Quantity/price shape validated at API boundary; business transitions validated in state objects | . | UpdateOrderStatusRequest.status | Order.updateStatus(status) | domain/order/state/* | Illegal transitions throw ConflictException | . | UpdateOrderStatusRequest.version | optimistic concurrency token | OrderService.checkExpectedVersion(...) | Enforces compare-and-set semantics before mutation | . | OrderResponse.status | aggregate lifecycle state | OrderStateFactory + concrete states | Read model reflects eventual consistency from async consume path | . Why this mapping exists . | Keeps transport contracts stable while domain logic evolves. | Prevents controller-layer duplication of domain transition rules. | Makes optimistic concurrency explicit at the API boundary. | Reduces misinterpretation between “validation error” and “state conflict” failure modes. | . Exception Mapping (GlobalExceptionHandler) . | NotFoundException -&gt; 404 NOT_FOUND | ConflictException -&gt; 409 CONFLICT | InfrastructureException -&gt; 503 SERVICE_UNAVAILABLE | validation and malformed payload failures -&gt; 400 BAD_REQUEST | uncaught exceptions -&gt; 500 UNEXPECTED_ERROR | . ",
+    "url": "/reference/api-layer/#dto-to-domain-mapping-rules",
+    
+    "relUrl": "/reference/api-layer/#dto-to-domain-mapping-rules"
+  },"5": {
+    "doc": "API Layer",
+    "title": "Package Structure",
+    "content": ". | interfaces/http/controller | interfaces/http/dto | interfaces/http/error | interfaces/http/exception | . ",
+    "url": "/reference/api-layer/#package-structure",
+    
+    "relUrl": "/reference/api-layer/#package-structure"
+  },"6": {
+    "doc": "API Layer",
+    "title": "API Layer",
+    "content": " ",
+    "url": "/reference/api-layer/",
+    
+    "relUrl": "/reference/api-layer/"
+  },"7": {
+    "doc": "Application Layer",
+    "title": "Application Layer Reference",
+    "content": " ",
+    "url": "/reference/application-layer/#application-layer-reference",
+    
+    "relUrl": "/reference/application-layer/#application-layer-reference"
+  },"8": {
+    "doc": "Application Layer",
+    "title": "Layer Purpose",
+    "content": "Application services orchestrate use-cases, transactions, and infrastructure ports while keeping domain logic and transport concerns separate. ",
+    "url": "/reference/application-layer/#layer-purpose",
+    
+    "relUrl": "/reference/application-layer/#layer-purpose"
+  },"9": {
+    "doc": "Application Layer",
+    "title": "Service Responsibilities",
+    "content": "OrderService (command/write side) . | Enforces regional write gating via RegionalFailoverManager | Implements idempotency lifecycle flow: . | resolve key state (IN_PROGRESS/COMPLETED/absent) | reserve IN_PROGRESS | persist order + outbox | mark COMPLETED after commit | . | Uses optimistic locking and retry semantics for status/cancel mutations | Invalidates read cache keys after successful writes | . OrderQueryService (query/read side) . | Cache-aside read orchestration for by-id and filtered-list calls | Coalesces concurrent cache misses by key to avoid thundering herd | Emits query timing/error metrics | Falls back to repository results when cache is degraded | . OutboxService . | Creates OutboxEntity rows with: . | event payload from schema registry | initial PENDING status | partition key for publisher sharding | . | . ",
+    "url": "/reference/application-layer/#service-responsibilities",
+    
+    "relUrl": "/reference/application-layer/#service-responsibilities"
+  },"10": {
+    "doc": "Application Layer",
+    "title": "Ports",
+    "content": ". | OrderRepository: order persistence contract over application snapshots (OrderRecord, OrderItemRecord) rather than infrastructure entities | OutboxRepository: outbox persistence/claim/archive contract | ProcessedEventRepository: consumer dedupe marker contract | EventPublisher: async integration event publication contract | CacheProvider: cache-aside operations contract | . ",
+    "url": "/reference/application-layer/#ports",
+    
+    "relUrl": "/reference/application-layer/#ports"
+  },"11": {
+    "doc": "Application Layer",
+    "title": "Key Application Invariants",
+    "content": ". | Writes are blocked when regional mode is passive | Order create does not directly publish Kafka events | Idempotency completion is recorded only after successful commit | Query reads remain available during cache failures | . ",
+    "url": "/reference/application-layer/#key-application-invariants",
+    
+    "relUrl": "/reference/application-layer/#key-application-invariants"
+  },"12": {
+    "doc": "Application Layer",
+    "title": "Application Layer",
+    "content": " ",
+    "url": "/reference/application-layer/",
+    
+    "relUrl": "/reference/application-layer/"
+  },"13": {
+    "doc": "Components and Tooling",
+    "title": "Components and Tooling",
+    "content": " ",
+    "url": "/components-and-tooling/",
+    
+    "relUrl": "/components-and-tooling/"
+  },"14": {
+    "doc": "Components and Tooling",
+    "title": "1. Component Boundaries",
+    "content": "Interface components . | OrderController: HTTP endpoint adapter for command/query operations | DTOs: request/response transport contracts and validation shape | GlobalExceptionHandler: maps internal exceptions to stable API error schema | . Application components . | OrderService: command-side orchestration and transactional write behavior | OrderQueryService: read-side cache-aside orchestration | OutboxService: persistence of integration events for async publication | ports: repository/cache/publisher abstractions for infrastructure substitution | . Domain components . | Order: aggregate root with lifecycle behavior | OrderState hierarchy: transition policy per lifecycle state | OrderStatus and OrderItem: domain value representations | . Infrastructure components . | persistence adapters: JPA-backed implementations of application ports | messaging pipeline: outbox scheduler/fetcher/processor/retry + producer/consumer | resilience/crosscutting: failover manager, global idempotency coordinator | web/security: request context, rate limiting, JWT claim conversion | . ",
+    "url": "/components-and-tooling/#1-component-boundaries",
+    
+    "relUrl": "/components-and-tooling/#1-component-boundaries"
+  },"15": {
+    "doc": "Components and Tooling",
+    "title": "2. Why These Components Exist",
+    "content": ". | Keep transport, business rules, and technical concerns independently changeable | Maximize write correctness without sacrificing async throughput | Preserve read availability under cache degradation | Make failure handling explicit and observable | . ",
+    "url": "/components-and-tooling/#2-why-these-components-exist",
+    
+    "relUrl": "/components-and-tooling/#2-why-these-components-exist"
+  },"16": {
+    "doc": "Components and Tooling",
+    "title": "3. Component Interaction Patterns",
+    "content": "3.1 Command side pattern . | Controller -&gt; OrderService -&gt; repository/outbox ports | idempotency check + regional gating before durable write | cache eviction after successful mutation | . 3.2 Event publication pattern . | write transaction persists outbox row | scheduled workers publish asynchronously to Kafka | retry policy managed by outbox components, not controllers/services | . 3.3 Event consumption pattern . | consumer validates payload | dedupe check + transition + processed marker in transaction | retries and DLT separation for transient vs terminal failures | . ",
+    "url": "/components-and-tooling/#3-component-interaction-patterns",
+    
+    "relUrl": "/components-and-tooling/#3-component-interaction-patterns"
+  },"17": {
+    "doc": "Components and Tooling",
+    "title": "4. Tooling and Rationale",
+    "content": "Runtime and framework . | Spring Boot: dependency management, lifecycle, actuator integration | Spring Web: HTTP routing and validation integration | Spring Security/OAuth2 Resource Server: JWT-based authN/authZ | . Persistence and messaging . | Spring Data JPA + Hibernate: relational persistence, optimistic locking, query abstraction | Spring Kafka: producer/consumer plumbing, retry-topic and DLT support | Spring Data Redis (Lettuce): distributed cache/rate-limiter state and resilience controls | . Observability and operations . | Micrometer + Prometheus: application and infra metrics | OpenTelemetry bridge: trace emission for distributed diagnostics | . Build and test . | Maven: build lifecycle and dependency management | JUnit 5 + Mockito + Spring test stack: layered unit/integration testing | . ",
+    "url": "/components-and-tooling/#4-tooling-and-rationale",
+    
+    "relUrl": "/components-and-tooling/#4-tooling-and-rationale"
+  },"18": {
+    "doc": "Components and Tooling",
+    "title": "5. Component-Level Failure Behavior",
+    "content": "| Component | Failure scenario | Expected behavior | . | RedisCacheProvider | Redis unavailable | fail-soft cache miss, DB fallback | . | RateLimitingFilter | Redis eval failure | fail-open request path | . | KafkaEventPublisher | broker send errors | async failure surfaced to outbox retry flow | . | OrderCreatedConsumer | duplicate delivery | dedupe marker prevents repeated mutation | . | RegionalFailoverManager | sustained unhealthy deps | switch passive, block writes | . | OrderService | stale version update | conflict response, no lost update | . ",
+    "url": "/components-and-tooling/#5-component-level-failure-behavior",
+    
+    "relUrl": "/components-and-tooling/#5-component-level-failure-behavior"
+  },"19": {
+    "doc": "Configuration and Runtime",
+    "title": "Configuration and Runtime Controls",
+    "content": " ",
+    "url": "/reference/configuration-and-runtime/#configuration-and-runtime-controls",
+    
+    "relUrl": "/reference/configuration-and-runtime/#configuration-and-runtime-controls"
+  },"20": {
+    "doc": "Configuration and Runtime",
+    "title": "Configuration Package Layout",
+    "content": ". | config/security/SecurityConfig . | JWT resource server | route authorization rules | authentication/authorization error responses | . | config/redis/RedisLettuceConfig . | Redis/Lettuce client setup | timeout/reconnect/pooling tuning | . | config/kafka . | package reserved for Kafka-focused runtime wiring | . | config/observability . | package reserved for observability-focused runtime wiring | . | . ",
+    "url": "/reference/configuration-and-runtime/#configuration-package-layout",
+    
+    "relUrl": "/reference/configuration-and-runtime/#configuration-package-layout"
+  },"21": {
+    "doc": "Configuration and Runtime",
+    "title": "application.yml Controls",
+    "content": "Outbox and publisher controls . | app.outbox.max-retries | app.outbox.backoff-base-ms | app.outbox.backoff-max-ms | app.outbox.backoff-jitter-percent | app.outbox.partition.total | app.outbox.partition.instance-id | app.outbox.partition.instance-count | app.outbox.publisher.poll-ms | app.outbox.publisher.batch-size | app.outbox.publisher.parallelism | app.outbox.publisher.max-in-flight | app.outbox.publisher.slow-kafka-threshold-ms | app.outbox.cleanup.retention-days | app.outbox.cleanup.poll-ms | . Kafka publish and consumer controls . | app.kafka.order-events-topic | app.kafka.consumer-group | spring.kafka.producer.transaction-id-prefix | spring.kafka.producer.properties.enable.idempotence | spring.kafka.producer.properties.acks | spring.kafka.producer.properties.max.in.flight.requests.per.connection | spring.kafka.consumer.properties.isolation.level | app.kafka.processing-delay-ms | app.kafka.processing-delay-multiplier | app.kafka.processing-delay-max-ms | app.kafka.delayed-processing-attempts | app.kafka.publisher.circuit-breaker.failure-threshold | app.kafka.publisher.circuit-breaker.open-seconds | . Multi-region and idempotency controls . | app.multi-region.enabled | app.multi-region.region-id | app.multi-region.failover.mode | app.multi-region.failover.rto-seconds | app.multi-region.failover.rpo-seconds | app.multi-region.auto-failover.poll-ms | app.multi-region.auto-failover.unhealthy-threshold | app.multi-region.auto-failover.healthy-threshold | app.multi-region.health.check-timeout-ms | app.multi-region.health.redis-latency-threshold-ms | app.multi-region.health.db-failure-threshold | app.multi-region.health.redis-failure-threshold | app.multi-region.health.kafka-failure-threshold | app.multi-region.global-idempotency.lock-ttl-seconds | app.multi-region.global-idempotency.completed-ttl-seconds | app.multi-region.consistency.conflict-resolution | . Dynamic rate-limit and backpressure controls . | app.security.rate-limit.requests | app.security.rate-limit.window-ms | app.security.rate-limit.policy-cache-ttl-ms | app.query.list-max-rows | app.backpressure.poll-ms | app.backpressure.outbox.elevated-backlog | app.backpressure.outbox.critical-backlog | app.backpressure.kafka.elevated-lag-ms | app.backpressure.kafka.critical-lag-ms | app.backpressure.db.elevated-utilization | app.backpressure.db.critical-utilization | . ",
+    "url": "/reference/configuration-and-runtime/#applicationyml-controls",
+    
+    "relUrl": "/reference/configuration-and-runtime/#applicationyml-controls"
+  },"22": {
+    "doc": "Configuration and Runtime",
+    "title": "Operationally Important Runtime Flags",
+    "content": ". | idempotency header remains optional; behavior changes when key absent/present | passive mode blocks writes but does not block reads | outbox retry ceiling and backoff strongly influence event freshness | adaptive retry classification influences reattempt pressure and terminalization rates | delayed consumer processing settings influence order progression latency | read_committed consumer mode avoids uncommitted transactional records | backpressure thresholds directly impact write admission and dynamic throttling | app.query.list-max-rows bounds legacy list responses to avoid accidental full-result scans | . ",
+    "url": "/reference/configuration-and-runtime/#operationally-important-runtime-flags",
+    
+    "relUrl": "/reference/configuration-and-runtime/#operationally-important-runtime-flags"
+  },"23": {
+    "doc": "Configuration and Runtime",
+    "title": "Principal Hardening Properties",
+    "content": "| Property | Purpose | Default | . | app.outbox.publisher.max-in-flight | hard cap of concurrent async outbox publishes | 16 | . | app.outbox.publisher.parallelism | partition worker parallelism | 8 | . | app.query.list-max-rows | upper bound for legacy /orders list reads | 1000 | . ",
+    "url": "/reference/configuration-and-runtime/#principal-hardening-properties",
+    
+    "relUrl": "/reference/configuration-and-runtime/#principal-hardening-properties"
+  },"24": {
+    "doc": "Configuration and Runtime",
+    "title": "Runtime Control Feedback Loop",
+    "content": "flowchart LR CFG[application.yml controls] --&gt; RPF[RateLimitPolicyProvider] CFG --&gt; ARS[AdaptiveRetryPolicyStrategy] CFG --&gt; BPM[BackpressureManager] BPM --&gt; RPF BPM --&gt; OS[OrderService write admission] BPM --&gt; ARS ARS --&gt; ORH[OutboxRetryHandler] ARS --&gt; OCC[OrderCreatedConsumer retry path] . ",
+    "url": "/reference/configuration-and-runtime/#runtime-control-feedback-loop",
+    
+    "relUrl": "/reference/configuration-and-runtime/#runtime-control-feedback-loop"
+  },"25": {
+    "doc": "Configuration and Runtime",
+    "title": "Transaction Manager Boundaries",
+    "content": ". | Write and read services explicitly bind to DB transaction manager: . | OrderService: @Transactional(transactionManager = \"transactionManager\") | OrderQueryService: @Transactional(transactionManager = \"transactionManager\", readOnly = true) | . | This is required because Kafka transactional publishing introduces additional transaction managers and implicit selection can become ambiguous. | . ",
+    "url": "/reference/configuration-and-runtime/#transaction-manager-boundaries",
+    
+    "relUrl": "/reference/configuration-and-runtime/#transaction-manager-boundaries"
+  },"26": {
+    "doc": "Configuration and Runtime",
+    "title": "Metrics Touchpoints",
+    "content": ". | Outbox: outbox.pending.count, outbox.failure.count, outbox.batch.size, outbox.publish.latency, outbox.publish.rate, outbox.lag, outbox.retry.count. | Retry: retry.delay.ms, retry.classification.count. | Kafka: kafka.consumer.errors, kafka.consumer.processed.count, kafka.consumer.retry.count, kafka.consumer.dlq.count, kafka.consumer.lag.ms, kafka.schema.validation.errors, kafka.event.version.distribution. | Regional resilience: failover.events.count, region.health.unhealthy.count, region.health.dependency.failure.count, region.health.redis.slow.count, region.health.redis.latency. | Regional consistency: region.conflict.rejected.count. | Backpressure: backpressure.level, backpressure.outbox.backlog, backpressure.kafka.lag.ms, backpressure.db.saturation.percent. | Cache and rate limiting: cache.hit.count, cache.miss.count, cache.error.count, cache.degraded.mode.count, rate_limit.allowed.count, rate_limit.blocked.count, rate_limit.dynamic.adjustments, rate_limit.rejections.by.policy. | . ",
+    "url": "/reference/configuration-and-runtime/#metrics-touchpoints",
+    
+    "relUrl": "/reference/configuration-and-runtime/#metrics-touchpoints"
+  },"27": {
+    "doc": "Configuration and Runtime",
+    "title": "Configuration and Runtime",
+    "content": " ",
+    "url": "/reference/configuration-and-runtime/",
+    
+    "relUrl": "/reference/configuration-and-runtime/"
+  },"28": {
+    "doc": "Design and Architecture",
+    "title": "Design and Architecture",
+    "content": " ",
+    "url": "/design-and-architecture/",
+    
+    "relUrl": "/design-and-architecture/"
+  },"29": {
+    "doc": "Design and Architecture",
+    "title": "1. Architectural Principles",
+    "content": "The service is implemented with Hexagonal Architecture, CQRS, and DDD aggregate modeling. | Interface layer (interfaces/http): transport contracts, validation, error mapping | Application layer (application/*): command/query orchestration, ports, transactional boundaries | Domain layer (domain/order/*): aggregate behavior and state transition invariants | Infrastructure layer (infrastructure/*): persistence, messaging, cache, security, resilience, crosscutting controls | . CQRS split: . | Write side: OrderService | Read side: OrderQueryService | . ",
+    "url": "/design-and-architecture/#1-architectural-principles",
+    
+    "relUrl": "/design-and-architecture/#1-architectural-principles"
+  },"30": {
+    "doc": "Design and Architecture",
+    "title": "2. Core Design Decisions",
+    "content": "2.1 Transactional Outbox over direct Kafka publish . Reason: commit order state and integration event atomically from the write transaction perspective. | Order write and outbox row are persisted in one DB transaction | Kafka publication is handled asynchronously by outbox workers | Prevents “DB committed, broker send failed” inconsistency | Worker claim semantics use explicit outbox leasing (IN_FLIGHT) with lease-expiry recovery to avoid duplicate concurrent publishers | . 2.2 State pattern for order lifecycle . Reason: enforce legal transitions in domain code, not controller/service condition chains. | Order delegates behavior to OrderState | Concrete states: PendingState, ProcessingState, ShippedState, DeliveredState, CancelledState | Illegal transitions fail with ConflictException | . 2.3 Global idempotency lifecycle states . Reason: avoid false completion and data loss during partial failures. | IN_PROGRESS: request accepted, business write not yet finalized | COMPLETED: order commit succeeded and key is mapped to orderId | completion is marked after commit via transaction synchronization | . 2.4 Active/passive write gating . Reason: prevent unsafe writes during regional dependency instability. | RegionalFailoverManager monitors DB/Redis/Kafka health | sustained unhealthy thresholds move region to passive | write APIs are gated via allowsWrites() | . 2.5 Transaction manager disambiguation . Reason: transactional Kafka producer introduces additional transaction manager beans and can make Spring transaction selection ambiguous. | DB service methods explicitly use transactionManager | avoids accidental routing of JPA operations through non-JPA transaction managers | . ",
+    "url": "/design-and-architecture/#2-core-design-decisions",
+    
+    "relUrl": "/design-and-architecture/#2-core-design-decisions"
+  },"31": {
+    "doc": "Design and Architecture",
+    "title": "3. Consistency Model",
+    "content": "Strong consistency paths . | application write contracts use persistence-neutral OrderRecord | OrderEntity remains infrastructure-only and is mapped in repository adapters | optimistic locking on updates/cancel (@Version) | idempotent create semantics with durable key lifecycle | . Eventual consistency paths . | post-create progression to PROCESSING via Kafka consumer | outbox retries/backoff for asynchronous publication | retry topics and DLT for consumer-side failure isolation | . Delivery contract (explicit) . | producer path is transactional Kafka publish + transactional outbox, not distributed XA across DB and Kafka | end-to-end delivery guarantee is at-least-once with idempotent consumption | ordering guarantee is per partition/per order key, not global total ordering across all orders | active-active conflict handling is version/timestamp/region precedence, not causal consistency | stale outbox workers are fenced by leaseOwner + leaseVersion checks on status transitions (IN_FLIGHT -&gt; SENT/FAILED) | . ",
+    "url": "/design-and-architecture/#3-consistency-model",
+    
+    "relUrl": "/design-and-architecture/#3-consistency-model"
+  },"32": {
+    "doc": "Design and Architecture",
+    "title": "4. Write Path Architecture",
+    "content": "4.1 Create order flow . | Validate request and authorize endpoint | Check regional write mode | Resolve idempotency state | Persist order + outbox event in one transaction | Return response | Mark idempotency key COMPLETED after commit | . 4.2 Update and cancel flow . | retrieve aggregate snapshot | apply state transition/cancel behavior in domain model | persist with optimistic version checks | evict query cache entries | . 4.3 Bounded read flow . | existing GET /orders remains backward-compatible | GET /orders/page provides bounded page reads (page, size) with status filter support | server caps page size to prevent unbounded memory pressure on high-cardinality datasets | legacy GET /orders now executes through a bounded repository page (app.query.list-max-rows) to prevent unbounded heap growth | . ",
+    "url": "/design-and-architecture/#4-write-path-architecture",
+    
+    "relUrl": "/design-and-architecture/#4-write-path-architecture"
+  },"33": {
+    "doc": "Design and Architecture",
+    "title": "4.4 Order Creation Idempotency Flow (Detailed)",
+    "content": "The create path is intentionally conservative because the system accepts retries from clients, API gateways, and load balancers. Detailed sequence: . | Normalize X-Idempotency-Key (trim, empty -&gt; null). | Resolve global idempotency state from Redis. | If state is COMPLETED and an orderId exists, load and return the persisted order. | If state is IN_PROGRESS, reject with conflict to prevent duplicate concurrent writes. | Mark key IN_PROGRESS (compare-and-set semantics in Redis). | Perform a second local dedupe lookup by idempotency key in the DB. | Build domain aggregate from DTO, apply domain invariants, and stamp regional metadata. | Persist order snapshot in DB transaction. | Serialize and enqueue outbox event in the same DB transaction. | Commit DB transaction. | After commit callback marks global key COMPLETED -&gt; orderId. | Return API response (new or deduped existing order). | . flowchart TD A[POST /orders] --&gt; B[Normalize idempotency key] B --&gt; C{Key present?} C -- No --&gt; N1[Create aggregate] C -- Yes --&gt; D[Resolve Redis idempotency state] D --&gt; E{State} E -- COMPLETED --&gt; F[Load order by orderId and return] E -- IN_PROGRESS --&gt; G[409 conflict] E -- ABSENT --&gt; H[Mark IN_PROGRESS] H --&gt; I{CAS success?} I -- No --&gt; G I -- Yes --&gt; J[DB lookup by idempotency key] J --&gt; K{Exists?} K -- Yes --&gt; L[Return existing order] K -- No --&gt; N1 N1 --&gt; N2[DB write order] N2 --&gt; N3[DB write outbox row] N3 --&gt; N4[Commit DB txn] N4 --&gt; N5[After-commit mark COMPLETED in Redis] N5 --&gt; N6[Return 201 Created] . ",
+    "url": "/design-and-architecture/#44-order-creation-idempotency-flow-detailed",
+    
+    "relUrl": "/design-and-architecture/#44-order-creation-idempotency-flow-detailed"
+  },"34": {
+    "doc": "Design and Architecture",
+    "title": "10. Principal Hardening (P0/P1/P2)",
+    "content": "P0 reliability hardening (implemented) . | outbox publish path is now completion-aware: partition workers wait for async broker completions | outbox publish concurrency is explicitly bounded by app.outbox.publisher.max-in-flight | consumer flow no longer blocks listener threads with Thread.sleep; retries are delegated to retry-topic orchestration | lease fencing uses both owner and version tokens to reject stale callbacks after reclaim | . P1 scalability hardening (implemented) . | list APIs are bounded by design (/orders/page and bounded fallback for /orders) | cache/list semantics remain backward compatible while protecting against high-cardinality full scans | . P2 operational hardening (documentation + observability) . | explicit chaos/load test scenarios are now documented and tied to measurable SLO signals | runtime dashboards map directly to outbox reclaim safety, DLQ drift, and backpressure transitions | . ",
+    "url": "/design-and-architecture/#10-principal-hardening-p0p1p2",
+    
+    "relUrl": "/design-and-architecture/#10-principal-hardening-p0p1p2"
+  },"35": {
+    "doc": "Design and Architecture",
+    "title": "5. Outbox Publication Pipeline",
+    "content": "Components: . | OutboxPublisher: scheduler + backpressure + worker orchestration | OutboxFetcher: partition-aware due row claim | OutboxProcessor: async publish + success transition | OutboxRetryHandler: retry policy and next-attempt scheduling | . Behavioral properties: . | bounded in-flight workers | bounded batch claim size | deterministic row ordering within processing batch | atomic lease transition (PENDING/FAILED -&gt; IN_FLIGHT) before worker release | lease timeout recovery for crashed workers | at-least-once delivery with consumer dedupe | . Detailed pipeline: . | Scheduler selects only partitions owned by current instance. | Worker permit is acquired (bounded concurrency). | Fetcher claims due rows with FOR UPDATE SKIP LOCKED semantics. | Claimed rows are transitioned to IN_FLIGHT and assigned leaseOwner + leaseVersion. | Processor starts async publish per row (bounded in-flight publish semaphore). | Success callback attempts markSentIfLeased(id, owner, version, ...). | If fenced update fails, callback is stale and safely ignored. | Failure callback runs adaptive retry policy and persists FAILED + nextAttemptAt with lease fencing. | Worker releases permit only after batch completion future resolves. | . flowchart TD P1[OutboxPublisher poll] --&gt; P2[Acquire worker permit] P2 --&gt; P3[Claim partition batch] P3 --&gt; P4[Set IN_FLIGHT + leaseOwner + leaseVersion] P4 --&gt; P5[Async publish] P5 --&gt; P6{Publish result} P6 -- Success --&gt; P7[Fenced markSentIfLeased] P6 -- Failure --&gt; P8[Adaptive retry plan] P8 --&gt; P9[Fenced markFailedIfLeased] P7 --&gt; P10[Release permit after completion] P9 --&gt; P10 . ",
+    "url": "/design-and-architecture/#5-outbox-publication-pipeline",
+    
+    "relUrl": "/design-and-architecture/#5-outbox-publication-pipeline"
+  },"36": {
+    "doc": "Design and Architecture",
+    "title": "5.1 Lease Fencing and Stale Worker Protection",
+    "content": ". | Lease owner is unique per claim cycle and partition worker. | Lease version increments on every claim. | Success/failure transitions require both owner and version match. | Any delayed callback from an expired lease cannot mutate the row. | This is the core anti-duplication guarantee for asynchronous publication races. | . ",
+    "url": "/design-and-architecture/#51-lease-fencing-and-stale-worker-protection",
+    
+    "relUrl": "/design-and-architecture/#51-lease-fencing-and-stale-worker-protection"
+  },"37": {
+    "doc": "Design and Architecture",
+    "title": "5.2 Eventual Consistency Contract",
+    "content": ". | Command write commit and outbox insert are strongly consistent within one DB transaction. | Kafka publication is asynchronous and eventually consistent. | Consumer dedup markers enforce idempotent state application. | End-to-end contract is at-least-once delivery with idempotent consume. | . ",
+    "url": "/design-and-architecture/#52-eventual-consistency-contract",
+    
+    "relUrl": "/design-and-architecture/#52-eventual-consistency-contract"
+  },"38": {
+    "doc": "Design and Architecture",
+    "title": "5.3 Regional Failover Decision Tree",
+    "content": "flowchart TD R1[Periodic health probe] --&gt; R2[Check DB] R2 --&gt; R3[Check Redis] R3 --&gt; R4[Check Kafka] R4 --&gt; R5{All healthy?} R5 -- Yes --&gt; R6[Increment healthy streak] R5 -- No --&gt; R7[Increment unhealthy streak] R7 --&gt; R8{Unhealthy threshold crossed?} R8 -- Yes --&gt; R9[Switch to PASSIVE] R8 -- No --&gt; R10[Remain current mode] R6 --&gt; R11{Recovery threshold crossed?} R11 -- Yes --&gt; R12[Switch to ACTIVE] R11 -- No --&gt; R10 R9 --&gt; R13[Write gating enabled] R12 --&gt; R14[Write gating disabled] . ",
+    "url": "/design-and-architecture/#53-regional-failover-decision-tree",
+    
+    "relUrl": "/design-and-architecture/#53-regional-failover-decision-tree"
+  },"39": {
+    "doc": "Design and Architecture",
+    "title": "5.4 Backpressure Propagation and Adaptive Throttling",
+    "content": "flowchart LR B1[kafka.consumer.lag.ms] --&gt; BM[BackpressureManager] B2[outbox.pending + outbox.failed] --&gt; BM B3[db.saturation] --&gt; BM BM --&gt; B4{Pressure level} B4 --&gt;|Moderate| B5[Tighten dynamic rate limits] B4 --&gt;|High| B6[Increase retry delays] B4 --&gt;|Critical| B7[Write gating / reject writes] . ",
+    "url": "/design-and-architecture/#54-backpressure-propagation-and-adaptive-throttling",
+    
+    "relUrl": "/design-and-architecture/#54-backpressure-propagation-and-adaptive-throttling"
+  },"40": {
+    "doc": "Design and Architecture",
+    "title": "5.5 Cross-Region HLC Conflict Resolution Flow",
+    "content": "Hybrid Logical Clock (HLC) hardening replaces pure wall-clock ordering in conflict resolution. Each candidate update is evaluated as a tuple: (physicalMillis, logicalCounter). Winning rule: . | incoming wins when incoming.physicalMillis &gt; current.physicalMillis | incoming wins when physical values are equal and incoming.logicalCounter &gt; current.logicalCounter | ties are broken deterministically by region id to prevent non-deterministic outcomes | . This avoids false overwrite decisions caused by NTP drift when regions disagree on wall clock by small offsets. flowchart TD H1[Incoming regional update] --&gt; H2[Build incoming HLC from occurredAt + version] H2 --&gt; H3[Build current HLC from persisted lastUpdatedTimestamp + version] H3 --&gt; H4{incoming HLC &gt; current HLC?} H4 -- Yes --&gt; H5[Apply update] H4 -- No --&gt; H6{incoming HLC == current HLC?} H6 -- No --&gt; H7[Reject as stale] H6 -- Yes --&gt; H8[Region-id tie breaker] H8 --&gt; H9{Incoming region &gt;= current region?} H9 -- Yes --&gt; H5 H9 -- No --&gt; H7 . ",
+    "url": "/design-and-architecture/#55-cross-region-hlc-conflict-resolution-flow",
+    
+    "relUrl": "/design-and-architecture/#55-cross-region-hlc-conflict-resolution-flow"
+  },"41": {
+    "doc": "Design and Architecture",
+    "title": "6. Kafka Consume and Dedupe Architecture",
+    "content": "OrderCreatedConsumer provides: . | schema validation/deserialization | delayed processing enforcement window | transactional dedupe marker + state transition | retry topic routing for transient conditions | DLT handling with structured diagnostics | . processed_events table is the idempotent-consume anchor. ",
+    "url": "/design-and-architecture/#6-kafka-consume-and-dedupe-architecture",
+    
+    "relUrl": "/design-and-architecture/#6-kafka-consume-and-dedupe-architecture"
+  },"42": {
+    "doc": "Design and Architecture",
+    "title": "7. Redis Usage Model",
+    "content": "Query cache . | adapter: RedisCacheProvider | cache-aside read strategy | soft-fail fallback to DB | local circuit-breaker behavior during repeated Redis faults | TTL jitter for synchronized-expiry reduction | . Rate limiting . | filter: RateLimitingFilter | token bucket in Lua for atomic refill/consume | distributed key scope (user:path:ip) | fail-open during Redis degradation to preserve availability | . ",
+    "url": "/design-and-architecture/#7-redis-usage-model",
+    
+    "relUrl": "/design-and-architecture/#7-redis-usage-model"
+  },"43": {
+    "doc": "Design and Architecture",
+    "title": "8. Security Model",
+    "content": ". | resource server JWT validation | role claim conversion to Spring authorities | endpoint-level access controls in SecurityConfig | normalized API error envelope with correlation id | . ",
+    "url": "/design-and-architecture/#8-security-model",
+    
+    "relUrl": "/design-and-architecture/#8-security-model"
+  },"44": {
+    "doc": "Design and Architecture",
+    "title": "9. Failure Matrix",
+    "content": "| Failure mode | Defensive mechanism | Observable outcome | . | create transaction fails | transactional rollback | no order, no outbox row | . | broker unavailable | outbox lease + adaptive retries/backoff | pending/in-flight/failed backlog grows then drains | . | duplicate Kafka delivery | processed-event dedupe | idempotent consume, no repeated transition | . | Redis cache failure | fail-soft cache adapter | DB fallback, increased cache error metrics | . | rate limiter Redis failure | fail-open policy | API remains available | . | stale concurrent write | optimistic locking | conflict response | . | prolonged dependency outage | active/passive failover | writes rejected in passive region | . ",
+    "url": "/design-and-architecture/#9-failure-matrix",
+    
+    "relUrl": "/design-and-architecture/#9-failure-matrix"
+  },"45": {
+    "doc": "Domain Layer",
+    "title": "Domain Layer Reference",
+    "content": " ",
+    "url": "/reference/domain-layer/#domain-layer-reference",
+    
+    "relUrl": "/reference/domain-layer/#domain-layer-reference"
+  },"46": {
+    "doc": "Domain Layer",
+    "title": "Package Location",
+    "content": ". | domain/order for aggregate/value types. | domain/order/state for state strategy hierarchy. | . ",
+    "url": "/reference/domain-layer/#package-location",
+    
+    "relUrl": "/reference/domain-layer/#package-location"
+  },"47": {
+    "doc": "Domain Layer",
+    "title": "Aggregate and Value Objects",
+    "content": "Order . | Aggregate root that owns lifecycle transitions and cancellation semantics | Creation entry points: . | create(...) for new aggregate construction | rehydrate(...) for persistence reconstruction | . | Behavior methods: . | updateStatus(...) | cancel() | promotePendingToProcessing() | . | . OrderItem . | Immutable value object (productName, quantity, price) | . OrderStatus . | Canonical lifecycle statuses used by state objects and persistence mapping | . ",
+    "url": "/reference/domain-layer/#aggregate-and-value-objects",
+    
+    "relUrl": "/reference/domain-layer/#aggregate-and-value-objects"
+  },"48": {
+    "doc": "Domain Layer",
+    "title": "State Pattern Structure",
+    "content": ". | OrderState: transition/cancel/promotion contract | AbstractOrderState: common transition lookup and default conflict behavior | OrderStateFactory: maps OrderStatus to concrete state implementation | Concrete states: . | PendingState | ProcessingState | ShippedState | DeliveredState | CancelledState | . | . ",
+    "url": "/reference/domain-layer/#state-pattern-structure",
+    
+    "relUrl": "/reference/domain-layer/#state-pattern-structure"
+  },"49": {
+    "doc": "Domain Layer",
+    "title": "Transition Rules",
+    "content": ". | Valid transitions are defined in concrete state maps | Invalid transitions throw ConflictException | cancel() is valid only from pending state | delivered/cancelled are terminal states for further transitions | . ",
+    "url": "/reference/domain-layer/#transition-rules",
+    
+    "relUrl": "/reference/domain-layer/#transition-rules"
+  },"50": {
+    "doc": "Domain Layer",
+    "title": "Domain Layer",
+    "content": " ",
+    "url": "/reference/domain-layer/",
+    
+    "relUrl": "/reference/domain-layer/"
+  },"51": {
+    "doc": "Folder and Class Reference",
+    "title": "Folder and Class Reference",
+    "content": " ",
+    "url": "/folder-and-class-reference/",
+    
+    "relUrl": "/folder-and-class-reference/"
+  },"52": {
+    "doc": "Folder and Class Reference",
+    "title": "Source Layout",
+    "content": ". | src/main/java/com/example/orderprocessing/interfaces/http | src/main/java/com/example/orderprocessing/application | src/main/java/com/example/orderprocessing/domain/order | src/main/java/com/example/orderprocessing/infrastructure | src/main/java/com/example/orderprocessing/config | . ",
+    "url": "/folder-and-class-reference/#source-layout",
+    
+    "relUrl": "/folder-and-class-reference/#source-layout"
+  },"53": {
+    "doc": "Folder and Class Reference",
+    "title": "Documentation Entry Points",
+    "content": ". | Reference Index | Interface HTTP Layer | Application Layer | Domain Layer | Infrastructure Layer | Configuration and Runtime Controls | . ",
+    "url": "/folder-and-class-reference/#documentation-entry-points",
+    
+    "relUrl": "/folder-and-class-reference/#documentation-entry-points"
+  },"54": {
+    "doc": "Folder and Class Reference",
+    "title": "Quick Responsibility Map",
+    "content": ". | Interfaces: endpoint contracts, request binding, error translation | Application: use-case orchestration, transactions, port boundaries | Domain: lifecycle invariants and state transitions | Infrastructure: adapters (DB/Kafka/Redis/security/resilience) | Config: runtime wiring and dependency-client setup | . ",
+    "url": "/folder-and-class-reference/#quick-responsibility-map",
+    
+    "relUrl": "/folder-and-class-reference/#quick-responsibility-map"
+  },"55": {
+    "doc": "Folder and Class Reference",
+    "title": "Why This Package Structure Exists",
+    "content": "The package layout is optimized for distributed-system correctness, not just code organization. interfaces/http: transport isolation . | Keeps HTTP concerns (validation, auth surface, error envelopes) out of domain code. | Prevents accidental coupling of request DTOs to persistence entities. | Makes API versioning and compatibility changes local to interface adapters. | . application: orchestration and write/read boundaries . | Centralizes idempotency lifecycle decisions and transactional boundaries. | Contains ports so application services are testable without DB/Kafka/Redis. | Separates write side (OrderService) and read side (OrderQueryService) for CQRS clarity. | . domain/order: invariants and optimistic concurrency semantics . | Encodes legal state transitions in state classes instead of controller conditionals. | Keeps business rule changes independent of transport and storage details. | Provides a single source of truth for conflict behavior. | . infrastructure: side effects and resilience mechanics . | Contains all adapters that talk to external systems. | Houses lease fencing, retry orchestration, regional failover logic, and rate limiting. | Ensures failure policy changes (fail-open vs fail-fast) are explicit and localized. | . config: runtime composition . | Wires concrete adapters to ports. | Encapsulates client tuning (timeouts, retry knobs, circuit-breaker related configs). | Keeps operational controls discoverable for production debugging. | . ",
+    "url": "/folder-and-class-reference/#why-this-package-structure-exists",
+    
+    "relUrl": "/folder-and-class-reference/#why-this-package-structure-exists"
+  },"56": {
+    "doc": "Folder and Class Reference",
+    "title": "Directory-to-Guarantee Mapping",
+    "content": "| Directory | Reliability Guarantee | Primary Terms | . | application/service | request-level idempotency and write gating | Idempotency, Write Gating | . | domain/order/state | legal lifecycle transitions | Optimistic Concurrency | . | infrastructure/messaging | reliable eventual publication | Lease Fencing, Eventual Consistency | . | infrastructure/web/ratelimit | admission control under load | Backpressure, fail-open | . | infrastructure/resilience | regional safety under dependency failures | Active/Passive mode, conflict suppression | . ",
+    "url": "/folder-and-class-reference/#directory-to-guarantee-mapping",
+    
+    "relUrl": "/folder-and-class-reference/#directory-to-guarantee-mapping"
+  },"57": {
+    "doc": "Reference",
+    "title": "Reference Documentation",
+    "content": "This section is the implementation-level map of packages, classes, and responsibilities. ",
+    "url": "/reference/#reference-documentation",
+    
+    "relUrl": "/reference/#reference-documentation"
+  },"58": {
+    "doc": "Reference",
+    "title": "Layer References",
+    "content": ". | Interface HTTP Layer | Application Layer | Domain Layer | Infrastructure Layer | Configuration and Runtime Controls | . ",
+    "url": "/reference/#layer-references",
+    
+    "relUrl": "/reference/#layer-references"
+  },"59": {
+    "doc": "Reference",
+    "title": "How to Use This Section",
+    "content": ". | Start with the layer page matching your change scope. | Use package and class listings to locate integration points quickly. | Cross-check runtime properties in configuration reference before behavior changes. | . ",
+    "url": "/reference/#how-to-use-this-section",
+    
+    "relUrl": "/reference/#how-to-use-this-section"
+  },"60": {
+    "doc": "Reference",
+    "title": "Reference",
+    "content": " ",
+    "url": "/reference/",
+    
+    "relUrl": "/reference/"
+  },"61": {
+    "doc": "Home",
+    "title": "Order Processing System Documentation",
+    "content": "This documentation describes the current implementation after adaptive retry, dynamic rate limiting, active-active consistency controls, transactional Kafka publishing, and system-wide backpressure propagation. ",
+    "url": "/#order-processing-system-documentation",
+    
+    "relUrl": "/#order-processing-system-documentation"
+  },"62": {
+    "doc": "Home",
+    "title": "Quick Start",
+    "content": ". | Build: mvn clean compile | Run: mvn spring-boot:run | Tests: mvn test | App package root: src/main/java/com/example/orderprocessing | . ",
+    "url": "/#quick-start",
+    
+    "relUrl": "/#quick-start"
+  },"63": {
+    "doc": "Home",
+    "title": "Implementation Snapshot",
+    "content": ". | Architecture: Hexagonal + CQRS + DDD aggregate/state pattern | Write correctness: idempotency (IN_PROGRESS/COMPLETED), optimistic locking, outbox | Async reliability: partitioned outbox workers, adaptive retry classification, Kafka consumer retries + DLT | Read performance: cache-aside query service + stampede coalescing + Redis circuit-breaker | Resilience: active/passive failover + active-active consistency conflict checks + system-wide backpressure | Security: JWT resource server + role-based route authorization + normalized API errors | Observability: Micrometer metrics, structured logs, tracing hooks | . ",
+    "url": "/#implementation-snapshot",
+    
+    "relUrl": "/#implementation-snapshot"
+  },"64": {
+    "doc": "Home",
+    "title": "Architecture Diagrams",
+    "content": "End-to-end Runtime View . flowchart LR Client[API Client] --&gt; SEC[Security Chain] SEC --&gt; API[interfaces/http/controller/OrderController] API --&gt; WS[application/service/OrderService] API --&gt; QS[application/service/OrderQueryService] WS --&gt; ORD[(OrderRepository Port)] ORD --&gt; JPA[infrastructure/persistence/adapter/PostgresOrderRepository] JPA --&gt; DB[(orders/order_items)] WS --&gt; OUT[(OutboxRepository Port)] OUT --&gt; OUTJPA[infrastructure/persistence/adapter/JpaOutboxRepository] OUTJPA --&gt; ODB[(outbox_events)] subgraph Outbox Publish Pipeline PUB[infrastructure/messaging/OutboxPublisher] --&gt; FCH[infrastructure/messaging/OutboxFetcher] FCH --&gt; ODB PUB --&gt; PROC[infrastructure/messaging/OutboxProcessor] PROC --&gt; RET[infrastructure/messaging/OutboxRetryHandler] PROC --&gt; KEP[infrastructure/messaging/producer/KafkaEventPublisher] KEP --&gt; SR[infrastructure/messaging/schema/VersionedJsonOrderCreatedEventSchemaRegistry] KEP --&gt; K[(Kafka order.events)] end K --&gt; KC[infrastructure/messaging/consumer/OrderCreatedConsumer] KC --&gt; PR[(ProcessedEventRepository Port)] PR --&gt; PRJPA[infrastructure/persistence/adapter/JpaProcessedEventRepository] PRJPA --&gt; PDB[(processed_events)] KC --&gt; DB QS --&gt; CP[(CacheProvider Port)] CP --&gt; RCP[infrastructure/cache/RedisCacheProvider] RCP --&gt; REDIS[(Redis)] SEC --&gt; RL[infrastructure/web/RateLimitingFilter] SEC --&gt; RC[infrastructure/web/RequestContextFilter] SEC --&gt; JWT[config/security/SecurityConfig] WS --&gt; GID[infrastructure/crosscutting/GlobalIdempotencyService] WS --&gt; RCM[infrastructure/resilience/RegionalConsistencyManager] WS --&gt; BPM[infrastructure/resilience/BackpressureManager] RL --&gt; RPP[infrastructure/web/ratelimit/RedisBackedRateLimitPolicyProvider] RPP --&gt; REDIS RPP --&gt; BPM KC --&gt; BPM PROC --&gt; RPS[infrastructure/messaging/retry/RetryPolicyStrategy] KC --&gt; RPS RCM --&gt; RFM[infrastructure/resilience/RegionalFailoverManager] RCM --&gt; CRS[infrastructure/resilience/conflict/ConflictResolutionStrategy] . Order State Lifecycle . stateDiagram-v2 [*] --&gt; PENDING PENDING --&gt; PROCESSING PENDING --&gt; SHIPPED PENDING --&gt; DELIVERED PENDING --&gt; CANCELLED PROCESSING --&gt; SHIPPED PROCESSING --&gt; DELIVERED SHIPPED --&gt; DELIVERED DELIVERED --&gt; [*] CANCELLED --&gt; [*] . Idempotent Create Lifecycle . sequenceDiagram autonumber participant C as Client participant OS as OrderService participant G as GlobalIdempotencyService participant DB as Orders DB participant O as Outbox DB C-&gt;&gt;OS: POST /orders + X-Idempotency-Key OS-&gt;&gt;G: resolveState(key) alt COMPLETED OS--&gt;&gt;C: return existing order else IN_PROGRESS OS--&gt;&gt;C: conflict/retryable response else ABSENT OS-&gt;&gt;G: markInProgress(key) OS-&gt;&gt;DB: save order OS-&gt;&gt;O: save outbox row OS--&gt;&gt;C: 201 Created OS-&gt;&gt;G: afterCommit markCompleted(key, orderId) end . Adaptive Outbox Retry Lifecycle . flowchart TD PF[Publish Failure] --&gt; RP[RetryPolicyStrategy.plan] RP --&gt; CLS{Classification} CLS --&gt;|TRANSIENT| TD1[Short adaptive delay] CLS --&gt;|SEMI_TRANSIENT| TD2[Medium adaptive delay] CLS --&gt;|PERMANENT| TD3[Terminalize row] TD1 --&gt; BP1[Scale delay by BackpressureManager] TD2 --&gt; BP2[Scale delay by BackpressureManager] BP1 --&gt; JT1[Apply jitter + max cap] BP2 --&gt; JT2[Apply jitter + max cap] JT1 --&gt; NXT1[Set nextAttemptAt] JT2 --&gt; NXT2[Set nextAttemptAt] TD3 --&gt; NXT3[Park as terminal FAILED] NXT1 --&gt; OBS1[Emit retry.delay.ms] NXT2 --&gt; OBS2[Emit retry.delay.ms] NXT3 --&gt; OBS3[Emit retry.classification.count] . Dynamic Rate Limiting Flow . sequenceDiagram autonumber participant Client participant Filter as RateLimitingFilter participant Provider as RedisBackedRateLimitPolicyProvider participant Redis participant BP as BackpressureManager Client-&gt;&gt;Filter: HTTP request Filter-&gt;&gt;Provider: resolve(request) Provider-&gt;&gt;Redis: policy config read (cached) Provider-&gt;&gt;BP: throttlingFactor() Provider--&gt;&gt;Filter: RateLimitPolicy(capacity, burst, window) Filter-&gt;&gt;Redis: token bucket Lua alt token bucket success Filter--&gt;&gt;Client: allow or 429 else script failure and fallback enabled Filter-&gt;&gt;Redis: sliding window Lua Filter--&gt;&gt;Client: allow or 429 else Redis unavailable Filter--&gt;&gt;Client: fail-open allow end . Global Backpressure Propagation . flowchart LR KC[Kafka Consumer lag recorder] --&gt; BPM[BackpressureManager] ODB[(outbox_events backlog)] --&gt; BPM DBP[(DB pool utilization)] --&gt; BPM BPM --&gt; LVL{Level} LVL --&gt;|NORMAL| N1[No throttling] LVL --&gt;|ELEVATED| N2[Tighten rate policies] LVL --&gt;|CRITICAL| N3[Reject write requests] N2 --&gt; RL[RateLimitingFilter] N3 --&gt; OS[OrderService write path] . ",
+    "url": "/#architecture-diagrams",
+    
+    "relUrl": "/#architecture-diagrams"
+  },"65": {
+    "doc": "Home",
+    "title": "Documentation Structure",
+    "content": "Core Guides . | Design and Architecture | Components and Tooling | Observability and Operations | Testing and Quality | Use Cases and Failure Scenarios | . Layered Reference . | Reference Index | Interface HTTP Layer | Application Layer | Domain Layer | Infrastructure Layer | Configuration and Runtime | Folder and Class Reference | . ",
+    "url": "/#documentation-structure",
+    
+    "relUrl": "/#documentation-structure"
+  },"66": {
+    "doc": "Home",
+    "title": "Home",
+    "content": " ",
+    "url": "/",
+    
+    "relUrl": "/"
+  },"67": {
+    "doc": "Infrastructure Layer",
+    "title": "Infrastructure Layer Reference",
+    "content": " ",
+    "url": "/reference/infrastructure-layer/#infrastructure-layer-reference",
+    
+    "relUrl": "/reference/infrastructure-layer/#infrastructure-layer-reference"
+  },"68": {
+    "doc": "Infrastructure Layer",
+    "title": "Scope",
+    "content": "Infrastructure implements application ports and hosts all external-system integrations (DB, Kafka, Redis, security, regional health). ",
+    "url": "/reference/infrastructure-layer/#scope",
+    
+    "relUrl": "/reference/infrastructure-layer/#scope"
+  },"69": {
+    "doc": "Infrastructure Layer",
+    "title": "Package Map",
+    "content": ". | infrastructure/persistence . | adapter: port implementations over Spring Data repositories | entity: JPA persistence models and lifecycle hooks | repository: Spring Data interfaces and custom queries | . | infrastructure/messaging . | outbox orchestration and shared messaging exceptions/utilities | . | infrastructure/messaging/retry . | adaptive retry classification and delay strategies | . | infrastructure/messaging/producer . | Kafka producer adapters | . | infrastructure/messaging/consumer . | Kafka listeners, retry-topic integration, DLT handling | . | infrastructure/messaging/schema . | event schema validation and compatibility rules | . | infrastructure/cache . | Redis-backed cache adapter with degrade-safe behavior | . | infrastructure/web . | request context and distributed rate limiting filters | . | infrastructure/web/ratelimit . | dynamic rate-limit policy resolution and Redis-backed policy cache | . | infrastructure/security . | JWT claim-to-authority conversion helpers | . | infrastructure/crosscutting . | global idempotency state coordinator | . | infrastructure/resilience . | regional health/failover, active-active conflict coordination, and backpressure management | . | . ",
+    "url": "/reference/infrastructure-layer/#package-map",
+    
+    "relUrl": "/reference/infrastructure-layer/#package-map"
+  },"70": {
+    "doc": "Infrastructure Layer",
+    "title": "Messaging and Outbox",
+    "content": "Package structure . | infrastructure/messaging | infrastructure/messaging/producer | infrastructure/messaging/consumer | infrastructure/messaging/schema | . Outbox pipeline . | OutboxPublisher . | scheduled coordinator | partition worker dispatch | semaphore-based in-flight backpressure | sent-row archive cleanup scheduling | . | OutboxFetcher . | partition-aware transactional claim | ordered candidate retrieval | . | OutboxProcessor . | async publication orchestration | success transition to SENT | publish latency/rate/lag metrics | . | OutboxRetryHandler . | retry count management | adaptive classification (TRANSIENT, SEMI_TRANSIENT, PERMANENT) | jittered bounded delay + failure reason persistence | . | . End-to-end publication sequence (expanded) . | OutboxPublisher polls and selects instance-owned partitions. | OutboxFetcher claims rows due for retry/publication in a DB transaction. | Claimed rows are marked IN_FLIGHT with leaseOwner and incremented leaseVersion. | OutboxProcessor asynchronously publishes to Kafka via EventPublisher. | Success callback attempts fenced transition to SENT. | Failure callback delegates to OutboxRetryHandler, which computes adaptive delay. | Retry handler writes fenced FAILED transition with nextAttemptAt. | Scheduler permit is released only after async completion to avoid hidden in-flight work. | . This sequence is intentionally split so DB atomicity and broker delivery can be reasoned about independently. Outbox state model (OutboxStatus) . | PENDING: ready for first publication | IN_FLIGHT: row is atomically leased by a worker; recoverable when lease expires (nextAttemptAt) | FAILED: publish attempt failed; eligible for retry by nextAttemptAt | SENT: publication completed successfully; eligible for archival cleanup | . Claiming and concurrency controls . | partition-aware claim prevents worker overlap across partitions | skip-locked SQL claim avoids lock contention under concurrent schedulers | claim transaction immediately transitions rows to IN_FLIGHT and persists lease expiry before commit | each claimed batch receives a generated leaseOwner token and monotonic leaseVersion | success/failure transitions are conditional (markSentIfLeased/markFailedIfLeased) using owner+version fencing so stale workers cannot overwrite newer claims | expired IN_FLIGHT leases are reclaimable for crash recovery | semaphore in publisher limits global in-flight worker pressure | batch-size controls enforce predictable per-poll work bounds | . Publish completion semantics . | worker slots are released only after async publish futures complete | this prevents optimistic over-dispatch where scheduler slots free early while broker acks are still pending | publish and retry callbacks execute fenced state transitions and are safe against lease reclaims | . Producer path (KafkaEventPublisher) . | validates/serializes events through schema registry | preserves per-order key ordering via chained futures | applies circuit-breaker fail-fast behavior after repeated failures | sends with Kafka transactions (executeInTransaction) and idempotent producer settings | delegates retries to outbox retry policy | . Producer failure semantics . | broker send failure is surfaced as exceptional completion | repeated failures open circuit for cooldown period | while open, send attempts fail fast and rely on outbox retry windows | . Consumer path (OrderCreatedConsumer) . | parses and validates payload | enforces delayed-processing window | executes dedupe + transition + marker write transactionally | uses retry-topic and DLT for failure containment | consumes with read_committed isolation | feeds lag telemetry into backpressure manager | applies regional conflict checks before state mutation | . Consumer idempotency and safety . | processed_events table guards duplicate deliveries | duplicate marker race on unique constraint is handled safely and acknowledged | manual acknowledgment occurs only after successful or duplicate-safe processing path | . ",
+    "url": "/reference/infrastructure-layer/#messaging-and-outbox",
+    
+    "relUrl": "/reference/infrastructure-layer/#messaging-and-outbox"
+  },"71": {
+    "doc": "Infrastructure Layer",
+    "title": "Resilience and Crosscutting Controls",
+    "content": "RegionalFailoverManager . | dependency probes for DB, Redis, Kafka | threshold-based ACTIVE/PASSIVE switching | recovery threshold before returning to ACTIVE | write gating hook consumed by application write service | . RegionalConsistencyManager . | wraps failover write-gating with region-aware consistency decisions | delegates conflict decisions to ConflictResolutionStrategy | emits rejected conflict telemetry | . BackpressureManager . | derives pressure level from: . | Kafka lag (from consumer) | outbox backlog (PENDING + FAILED) | DB saturation | . | exports level/inputs as gauges | exposes adaptive throttling factor for rate limits | exposes critical-pressure write rejection signal for command path | . Health check strategy . | DB: JDBC connection validity check within timeout | Redis: ping + latency threshold tracking | Kafka: cluster metadata + controller + topic-listing validation | . GlobalIdempotencyService . | Redis-backed request-key lifecycle state: . | IN_PROGRESS | COMPLETED | . | compatibility parsing for legacy key encodings | completion mapping used to prevent duplicate creates | . MultiRegionHealthIndicator . | exposes current mode and write-eligibility via actuator health | . ",
+    "url": "/reference/infrastructure-layer/#resilience-and-crosscutting-controls",
+    
+    "relUrl": "/reference/infrastructure-layer/#resilience-and-crosscutting-controls"
+  },"72": {
+    "doc": "Infrastructure Layer",
+    "title": "Persistence Infrastructure",
+    "content": "Adapter responsibilities . | PostgresOrderRepository . | implements OrderRepository port | maps OrderRecord &lt;-&gt; OrderEntity to keep infrastructure models out of application contracts | find/save operations for order read/write paths | . | JpaOutboxRepository . | implements OutboxRepository | supports save, partition claim, status counts, archive copy, and active-row cleanup | . | JpaProcessedEventRepository . | implements ProcessedEventRepository | dedupe marker existence checks and saves | . | . Entity intent . | OrderEntity . | durable order snapshot | optimistic lock version | idempotency key persistence | region metadata (regionId, lastUpdatedTimestamp) for active-active safety | . | OutboxEntity . | active outbox row including retry and scheduling metadata | failure metadata (failureType, lastFailureReason) for adaptive retries | explicit in-flight lease state plus lease fencing metadata (leaseOwner, leaseVersion, nextAttemptAt) | lifecycle hooks initialize defaults and timestamps | . | OutboxArchiveEntity . | immutable historical copy of sent events | . | ProcessedEventEntity . | consumed-event dedupe marker for idempotent consumers | . | . ",
+    "url": "/reference/infrastructure-layer/#persistence-infrastructure",
+    
+    "relUrl": "/reference/infrastructure-layer/#persistence-infrastructure"
+  },"73": {
+    "doc": "Infrastructure Layer",
+    "title": "Persistence Infrastructure",
+    "content": "Adapters . | PostgresOrderRepository | JpaOutboxRepository | JpaProcessedEventRepository | . Spring Data repositories . | SpringOrderJpaRepository | SpringOutboxJpaRepository | SpringOutboxArchiveJpaRepository | SpringProcessedEventJpaRepository | . Entities . | OrderEntity, OrderItemEmbeddable | OutboxEntity, OutboxArchiveEntity, OutboxStatus | ProcessedEventEntity | . ",
+    "url": "/reference/infrastructure-layer/#persistence-infrastructure-1",
+    
+    "relUrl": "/reference/infrastructure-layer/#persistence-infrastructure-1"
+  },"74": {
+    "doc": "Infrastructure Layer",
+    "title": "Web and Security Infrastructure",
+    "content": ". | RequestContextFilter: request and region context propagation into MDC/response/metrics | RateLimitingFilter: dynamic policy-driven token bucket with sliding-window fallback and adaptive throttling | RateLimitPolicyProvider / RedisBackedRateLimitPolicyProvider: user-tier/endpoint/load policy resolution | RoleClaimJwtAuthenticationConverter: JWT role claim to authority mapping | . ",
+    "url": "/reference/infrastructure-layer/#web-and-security-infrastructure",
+    
+    "relUrl": "/reference/infrastructure-layer/#web-and-security-infrastructure"
+  },"75": {
+    "doc": "Infrastructure Layer",
+    "title": "Detailed Runtime Flows",
+    "content": "Adaptive retry decision path . flowchart TD HF[Outbox/Consumer failure] --&gt; STRAT[AdaptiveRetryPolicyStrategy] STRAT --&gt; FC[Classify failure type] FC --&gt; C1[TRANSIENT] FC --&gt; C2[SEMI_TRANSIENT] FC --&gt; C3[PERMANENT] C1 --&gt; D1[Compute delay using retries + load] C2 --&gt; D2[Compute delay using retries + load] C3 --&gt; T[Terminal fail path] D1 --&gt; J1[Apply jitter + max cap] D2 --&gt; J2[Apply jitter + max cap] J1 --&gt; P1[Persist nextAttemptAt] J2 --&gt; P2[Persist nextAttemptAt] T --&gt; P3[Persist parked FAILED] . Active-active conflict guard . sequenceDiagram autonumber participant Service as OrderService/Consumer participant RCM as RegionalConsistencyManager participant CRS as ConflictResolutionStrategy participant Repo as OrderRepository Service-&gt;&gt;Repo: load current order state Service-&gt;&gt;RCM: shouldApplyIncomingUpdate(...) RCM-&gt;&gt;CRS: evaluate(current, incomingRegion, incomingTs, incomingVersion) alt accepted Service-&gt;&gt;Repo: save update with regionId + lastUpdatedTimestamp else rejected RCM--&gt;&gt;Service: reject stale/conflicting update end . ",
+    "url": "/reference/infrastructure-layer/#detailed-runtime-flows",
+    
+    "relUrl": "/reference/infrastructure-layer/#detailed-runtime-flows"
+  },"76": {
+    "doc": "Infrastructure Layer",
+    "title": "Key Metrics by Infrastructure Area",
+    "content": ". | Outbox . | outbox.pending.count, outbox.failure.count, outbox.publish.rate, outbox.publish.latency, outbox.lag | . | Kafka consumer . | kafka.consumer.processed.count, kafka.consumer.retry.count, kafka.consumer.errors, kafka.consumer.dlq.count | . | Schema . | kafka.schema.validation.errors, kafka.event.version.distribution | . | Cache/Redis . | cache.hit.count, cache.miss.count, cache.error.count, cache.degraded.mode.count, redis.connection.failures | . | Rate limiting . | rate_limit.allowed.count, rate_limit.blocked.count, rate_limit.dynamic.adjustments, rate_limit.rejections.by.policy | . | Adaptive retry . | retry.delay.ms, retry.classification.count | . | Backpressure . | backpressure.level, backpressure.outbox.backlog, backpressure.kafka.lag.ms, backpressure.db.saturation.percent | . | Regional consistency . | region.conflict.rejected.count | . | Regional failover . | failover.events.count, region.health.unhealthy.count, region.health.dependency.failure.count | . | . ",
+    "url": "/reference/infrastructure-layer/#key-metrics-by-infrastructure-area",
+    
+    "relUrl": "/reference/infrastructure-layer/#key-metrics-by-infrastructure-area"
+  },"77": {
+    "doc": "Infrastructure Layer",
+    "title": "Infrastructure Failure Matrix",
+    "content": "| Area | Failure | Protective behavior | Outcome | . | Outbox publish | Kafka unavailable | IN_FLIGHT lease + adaptive retry/backoff + failed status | eventual publication after recovery | . | Consumer | duplicate delivery | processed-event dedupe | no duplicate state mutation | . | Cache | Redis failure | fail-soft read path | DB fallback, higher latency possible | . | Rate limiting | Redis script error | fail-open policy | availability prioritized over throttling | . | Regional control | repeated dependency failure | switch to passive | writes gated until healthy | . ",
+    "url": "/reference/infrastructure-layer/#infrastructure-failure-matrix",
+    
+    "relUrl": "/reference/infrastructure-layer/#infrastructure-failure-matrix"
+  },"78": {
+    "doc": "Infrastructure Layer",
+    "title": "Infrastructure Layer",
+    "content": " ",
+    "url": "/reference/infrastructure-layer/",
+    
+    "relUrl": "/reference/infrastructure-layer/"
+  },"79": {
+    "doc": "Observability and Operations",
+    "title": "Observability, Logging, Monitoring, and Operations",
+    "content": " ",
+    "url": "/observability-and-operations/#observability-logging-monitoring-and-operations",
+    
+    "relUrl": "/observability-and-operations/#observability-logging-monitoring-and-operations"
+  },"80": {
+    "doc": "Observability and Operations",
+    "title": "1. Logging Model",
+    "content": "Structured logging fields include: . | timestamp, level, logger, message | request_id from RequestContextFilter | region_id from RequestContextFilter | order_id from service-level MDC context | trace_id from tracing context | . X-Request-Id is accepted/generated and returned to clients, enabling incident correlation. ",
+    "url": "/observability-and-operations/#1-logging-model",
+    
+    "relUrl": "/observability-and-operations/#1-logging-model"
+  },"81": {
+    "doc": "Observability and Operations",
+    "title": "2. Metrics Catalog (Current Implementation)",
+    "content": "HTTP and API metrics . | http.server.request.count | http.server.request.latency (p95, p99) | http.server.request.errors | http.server.requests.by.region | . Business and service metrics . | orders.service.request.count | orders.created.count | orders.idempotency.hit.count | orders.operation.failure.count | orders.operation.duration | orders.query.request.count | orders.query.error.count | orders.query.duration | . Cache metrics . | cache.hit.count | cache.miss.count | cache.error.count | cache.degraded.mode.count | redis.connection.failures (tagged by component) | redis.command.latency (tagged by command/component) | . Rate limiting metrics . | rate_limit.allowed.count | rate_limit.blocked.count | rate_limit.dynamic.adjustments | rate_limit.rejections.by.policy | . Adaptive retry and backpressure metrics . | retry.delay.ms | retry.classification.count (TRANSIENT, SEMI_TRANSIENT, PERMANENT) | backpressure.level | backpressure.outbox.backlog | backpressure.kafka.lag.ms | backpressure.db.saturation.percent | db.query.duration (histogram + exemplars when trace context exists) | . Outbox metrics . | outbox.pending.count | outbox.failure.count | outbox.publish.latency | outbox.batch.size | outbox.publish.rate | outbox.lag | outbox.retry.count | . Kafka and schema metrics . | kafka.consumer.errors | kafka.consumer.lag.ms | kafka.consumer.processed.count | kafka.consumer.retry.count | kafka.consumer.dlq.count | kafka.schema.validation.errors | kafka.event.version.distribution | . Regional resilience metrics . | failover.events.count | region.health.unhealthy.count | region.health.dependency.failure.count | region.conflict.rejected.count | . ",
+    "url": "/observability-and-operations/#2-metrics-catalog-current-implementation",
+    
+    "relUrl": "/observability-and-operations/#2-metrics-catalog-current-implementation"
+  },"82": {
+    "doc": "Observability and Operations",
+    "title": "3. Tracing",
+    "content": "Configured through Micrometer bridge and OTLP endpoint: . | management.tracing.sampling.probability | management.otlp.tracing.endpoint | . Use traces + request_id for end-to-end debugging. ",
+    "url": "/observability-and-operations/#3-tracing",
+    
+    "relUrl": "/observability-and-operations/#3-tracing"
+  },"83": {
+    "doc": "Observability and Operations",
+    "title": "4. Reliability and Retry Behavior",
+    "content": "Outbox pipeline (OutboxPublisher + OutboxFetcher + OutboxProcessor + OutboxRetryHandler) . | Scheduler dispatches owned partitions with in-flight semaphore backpressure. | Fetcher claims rows in transaction, records outbox.batch.size, and preserves deterministic aggregate ordering. | Processor performs async publish, tracks publish latency/rate/lag, and marks SENT on completion. | Retry handler updates retry count, classifies failure type, computes adaptive delay (retry count + system pressure + jitter + cap), and parks terminal/permanent failures. | Kafka publisher is async and single-attempt; retry/backoff policy is intentionally owned by outbox to keep retry control deterministic. | Cleanup archives/deletes old SENT rows on retention schedule. | . Kafka consumer . | Manual ack mode (manual_immediate) with ack after transactional processing success. | Dedupe check + domain update + processed marker insertion executed in transaction template boundary. | Retry topics with exponential backoff and max attempts; DLT handler logs payload context and headers. | Versioned schema parsing with fallback compatibility logic. | read_committed consumption prevents seeing aborted transactional producer records. | Kafka lag measurements feed BackpressureManager for global admission/throttling decisions. | . ",
+    "url": "/observability-and-operations/#4-reliability-and-retry-behavior",
+    
+    "relUrl": "/observability-and-operations/#4-reliability-and-retry-behavior"
+  },"84": {
+    "doc": "Observability and Operations",
+    "title": "5.1 Feedback Loops and Signal Propagation",
+    "content": "flowchart LR KAFKA_LAG[kafka.consumer.lag.ms] --&gt; BPM[BackpressureManager] OUTBOX[outbox.pending.count + outbox.failure.count] --&gt; BPM DBSAT[DB pool saturation] --&gt; BPM BPM --&gt; WRITES[OrderService write admission] BPM --&gt; RLP[RateLimitPolicyProvider adaptive policy] BPM --&gt; RETRY[AdaptiveRetryPolicyStrategy] . Interpretation details: . | Lag and backlog signals are normalized into a single pressure level. | Pressure level drives three downstream controls: write admission, rate-limit policy, and retry delay. | Controls are intentionally asymmetric: . | rate limits tighten first (protects availability), | retry delays increase second (reduces downstream thrash), | write rejection activates last (protects correctness under critical saturation). | . | This staged behavior prevents abrupt mode flapping and keeps eventual drain possible. | . ",
+    "url": "/observability-and-operations/#51-feedback-loops-and-signal-propagation",
+    
+    "relUrl": "/observability-and-operations/#51-feedback-loops-and-signal-propagation"
+  },"85": {
+    "doc": "Observability and Operations",
+    "title": "5.2 Exemplar-driven Debugging (Prometheus -&gt; Trace)",
+    "content": "The service now emits exemplar-friendly histograms for: . | http.server.requests | db.query.duration | . With tracing enabled, Micrometer attaches the active trace_id as exemplar metadata to latency buckets. Operational workflow: . | SRE spots spike in Prometheus latency histogram. | SRE opens bucket exemplar and extracts trace id. | Trace id is queried in Jaeger/Tempo. | Full distributed path is inspected (controller -&gt; query service -&gt; repository/cache fallback). | . This removes guesswork when separating saturation from path-specific regressions. ",
+    "url": "/observability-and-operations/#52-exemplar-driven-debugging-prometheus---trace",
+    
+    "relUrl": "/observability-and-operations/#52-exemplar-driven-debugging-prometheus---trace"
+  },"86": {
+    "doc": "Observability and Operations",
+    "title": "5.3 HLC Conflict Telemetry Notes",
+    "content": "Regional conflict evaluation now uses Hybrid Logical Clock ordering: . | physical clock in milliseconds (lastUpdatedTimestamp / incoming occurredAt) | logical counter (version) | . When HLC comparison rejects an update, region.conflict.rejected.count increments. This metric should be interpreted alongside clock-skew and replication-delay dashboards. ",
+    "url": "/observability-and-operations/#53-hlc-conflict-telemetry-notes",
+    
+    "relUrl": "/observability-and-operations/#53-hlc-conflict-telemetry-notes"
+  },"87": {
+    "doc": "Observability and Operations",
+    "title": "6. Operational Alerts and Interpretation",
+    "content": "High outbox backlog . | Signals: rising outbox.pending.count and outbox.failure.count | Likely causes: broker issues, schema failures, retry pressure | Actions: validate broker health, inspect retry logs, verify schema errors | . Elevated cache degradation . | Signals: rising cache.error.count / cache.degraded.mode.count | Likely causes: Redis connectivity/latency issues | Actions: check Redis health, verify fallback DB latency capacity | . Retry storm / DLT growth . | Signals: rising kafka.consumer.retry.count, kafka.consumer.dlq.count | Likely causes: malformed payloads, persistent downstream dependency issues | Actions: inspect DLT payload contexts, classify and replay only safe records | . ",
+    "url": "/observability-and-operations/#6-operational-alerts-and-interpretation",
+    
+    "relUrl": "/observability-and-operations/#6-operational-alerts-and-interpretation"
+  },"88": {
+    "doc": "Observability and Operations",
+    "title": "7. DLQ Operations Guidance",
+    "content": "When kafka.consumer.dlq.count rises: . | Inspect DLQ logs with eventId, orderId, topic/partition/offset. | Classify failures: . | payload/schema issues | missing order records | persistent downstream failures | . | Decide replay/ignore policy. | Apply fix and replay if safe. | . ",
+    "url": "/observability-and-operations/#7-dlq-operations-guidance",
+    
+    "relUrl": "/observability-and-operations/#7-dlq-operations-guidance"
+  },"89": {
+    "doc": "Observability and Operations",
+    "title": "8. Real-world Monitoring Scenarios",
+    "content": "Scenario: Kafka outage . Symptoms: . | rising outbox.pending.count | rising outbox.failure.count | stable API latency (writes still commit) | . Action: . | restore Kafka | confirm outbox drain by falling pending/failure gauges | . Scenario: Redis instability . Symptoms: . | rising cache.error.count | rising cache.degraded.mode.count | possibly rising DB read load | . Action: . | restore Redis | verify cache hits recover | . Scenario: abusive traffic or bot spikes . Symptoms: . | rising rate_limit.blocked.count | rising rate_limit.dynamic.adjustments during pressure events | . Action: . | tune token bucket limits/window | add edge/WAF controls if needed | . Scenario: consumer retry storm . Symptoms: . | rising kafka.consumer.retry.count | lag rising | potential DLQ increase | . Action: . | inspect root cause class of retries | verify retry bounds and delay settings | scale consumers / fix downstream dependency | . Scenario: regional failover event . Symptoms: . | failover.events.count increments | increased 503 on write endpoints in passive node | request logs include impacted region_id | . Action: . | Validate root cause (DB/Redis/Kafka health in region). | Confirm global traffic router moved writes to healthy region. | Track recovery and verify node returns active state. | . Scenario: active-active conflict suppression . Symptoms: . | rising region.conflict.rejected.count | elevated concurrent writes from multiple regions | . Action: . | verify conflict policy mode (last-write-wins vs version-based) | inspect conflicting event/order timestamps and versions | ensure upstream routing consistency for hot aggregates | . ",
+    "url": "/observability-and-operations/#8-real-world-monitoring-scenarios",
+    
+    "relUrl": "/observability-and-operations/#8-real-world-monitoring-scenarios"
+  },"90": {
+    "doc": "Observability and Operations",
+    "title": "9. Runbook Checkpoints",
+    "content": ". | Verify Kafka connectivity and topic health. | Verify Redis availability and latency. | Verify Prometheus scraping /actuator/prometheus. | Verify trace export endpoint and sampling settings. | Verify outbox backlog and DLQ trends on deployments. | Verify regional health and failover mode in /actuator/health (multiRegion). | . ",
+    "url": "/observability-and-operations/#9-runbook-checkpoints",
+    
+    "relUrl": "/observability-and-operations/#9-runbook-checkpoints"
+  },"91": {
+    "doc": "Observability and Operations",
+    "title": "10. P2 Chaos and Load Validation Matrix",
+    "content": "| Scenario | Injected Fault | Expected Signal | Pass Criteria | . | Slow broker acks | broker latency and partial throttling | outbox.publish.latency p95 rises | in-flight publishes remain capped (app.outbox.publisher.max-in-flight) | . | Lease reclaim race | worker delayed beyond lease expiry | fenced update rejection logs and counters | no stale IN_FLIGHT -&gt; SENT overwrite | . | Redis degradation | Redis unavailable during rate-limit checks | redis.connection.failures increases | API remains available (fail-open) | . | Consumer retry pressure | transient DB failures | kafka.consumer.retry.count increases | no listener thread sleep stalls | . ",
+    "url": "/observability-and-operations/#10-p2-chaos-and-load-validation-matrix",
+    
+    "relUrl": "/observability-and-operations/#10-p2-chaos-and-load-validation-matrix"
+  },"92": {
+    "doc": "Observability and Operations",
+    "title": "Observability and Operations",
+    "content": " ",
+    "url": "/observability-and-operations/",
+    
+    "relUrl": "/observability-and-operations/"
+  },"93": {
+    "doc": "Testing and Quality",
+    "title": "Testing and Quality",
+    "content": " ",
+    "url": "/testing-and-quality/",
+    
+    "relUrl": "/testing-and-quality/"
+  },"94": {
+    "doc": "Testing and Quality",
+    "title": "1. Testing Objectives",
+    "content": ". | validate correctness of domain transitions and write invariants | verify idempotency lifecycle semantics under retries/concurrency | prove outbox/event flow reliability under failure conditions | ensure API contracts remain stable for success and error paths | verify degradation behavior for Redis/Kafka/regional dependencies | . ",
+    "url": "/testing-and-quality/#1-testing-objectives",
+    
+    "relUrl": "/testing-and-quality/#1-testing-objectives"
+  },"95": {
+    "doc": "Testing and Quality",
+    "title": "2. Current Test Coverage (Implemented)",
+    "content": "Domain layer . | OrderAggregateTest . | valid transition paths | invalid transition conflicts | cancellation invariants | . | . Application layer . | OrderServiceIdempotencyLifecycleTest . | same key same outcome | in-progress duplicate rejection and safe retry | completed reuse behavior | duplicate prevention under concurrent retries | . | OutboxServiceTest . | outbox row creation shape and defaults | . | . Messaging/outbox components . | OutboxProcessorTest | OutboxFetcherTest | OutboxPublisherTest | KafkaEventPublisherTest | OrderCreatedConsumerUnitTest | OutboxRetryHandlerTest | . Coverage focus: . | async publish result handling | atomic outbox lease transitions (IN_FLIGHT) at claim time | lease-fenced finalization (markSentIfLeased/markFailedIfLeased) to prevent stale worker overwrite | retry transitions, adaptive classification, and scheduling metadata | consumer dedupe and delayed processing behavior | transactional Kafka publish path and circuit-open behavior | . Infrastructure/resilience . | RedisCacheProviderTest | RateLimitingFilterTest | RegionalFailoverManagerTest | . Coverage focus: . | cache hit/miss/degraded behavior | limiter allow/block with dynamic policy input and fail-open fallback | active/passive switching and write gating signals | . API integration . | OrderControllerIntegrationTest . | create/read/status/cancel route behavior | idempotency behavior at HTTP boundary | validation and error contract behavior | . | . ",
+    "url": "/testing-and-quality/#2-current-test-coverage-implemented",
+    
+    "relUrl": "/testing-and-quality/#2-current-test-coverage-implemented"
+  },"96": {
+    "doc": "Testing and Quality",
+    "title": "3. Critical Test Flows",
+    "content": "flowchart TD F[OutboxFetcherTest] --&gt; F1[Claimed rows transition to IN_FLIGHT] F --&gt; F2[Lease nextAttemptAt persisted before processing] A[OutboxRetryHandlerTest] --&gt; A1[Transient classification schedules nextAttemptAt] A --&gt; A2[Permanent classification terminalizes row] B[KafkaEventPublisherTest] --&gt; B1[Transactional publish success] B --&gt; B2[Circuit opens after repeated transaction failures] C[RateLimitingFilterTest] --&gt; C1[Token bucket allow path] C --&gt; C2[429 block path] D[OrderCreatedConsumerUnitTest] --&gt; D1[Dedupe marker + state promotion] . ",
+    "url": "/testing-and-quality/#3-critical-test-flows",
+    
+    "relUrl": "/testing-and-quality/#3-critical-test-flows"
+  },"97": {
+    "doc": "Testing and Quality",
+    "title": "4. Test Design Standards",
+    "content": ". | deterministic and independent test execution | meaningful assertions on business outcomes, not implementation details | minimal over-mocking of core orchestration logic | integration tests for cross-component critical paths | . ",
+    "url": "/testing-and-quality/#4-test-design-standards",
+    
+    "relUrl": "/testing-and-quality/#4-test-design-standards"
+  },"98": {
+    "doc": "Testing and Quality",
+    "title": "5. Residual Gaps / Next Expansion",
+    "content": ". | embedded Kafka end-to-end verification (outbox -&gt; producer -&gt; consumer) | crash-injection integration around outbox lease expiry/reclaim path | deterministic active-recovery-to-active integration with controlled dependency health | conflict resolution strategy permutations under concurrent active-active writes | backpressure-level transitions driving write admission and dynamic throttling | paginated API contract tests for GET /orders/page with size cap and status filter behavior | . ",
+    "url": "/testing-and-quality/#5-residual-gaps--next-expansion",
+    
+    "relUrl": "/testing-and-quality/#5-residual-gaps--next-expansion"
+  },"99": {
+    "doc": "Testing and Quality",
+    "title": "7. Principal Reliability Test Matrix",
+    "content": "P0 contract scenarios . | stale callback rejection: old lease owner/version must fail state transition after reclaim | async completion bounding: configured in-flight publish cap must hold under slow broker acks | listener liveness: consumer retry path must not block poll loop threads | . P1/P2 operational scenarios . | bounded list behavior at high data volume for /orders and /orders/page | backpressure transition correctness (NORMAL -&gt; ELEVATED -&gt; CRITICAL) and write gating | DLQ growth alerts and replay readiness validation | . ",
+    "url": "/testing-and-quality/#7-principal-reliability-test-matrix",
+    
+    "relUrl": "/testing-and-quality/#7-principal-reliability-test-matrix"
+  },"100": {
+    "doc": "Testing and Quality",
+    "title": "6. Quality Gates",
+    "content": ". | mvn clean compile must pass | targeted reliability suites should pass before broad runs | API and idempotency regression tests are mandatory for write-path changes | . ",
+    "url": "/testing-and-quality/#6-quality-gates",
+    
+    "relUrl": "/testing-and-quality/#6-quality-gates"
+  },"101": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Use Cases and Failure Cases",
+    "content": "This section documents practical end-to-end use cases for the Order Processing System. Each use case has: . | Positive path: expected successful behavior | Failure path: resilience/fallback behavior | Real example data: request/event payloads and expected outcomes | . ",
+    "url": "/use-cases-and-failure-scenarios/#use-cases-and-failure-cases",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/#use-cases-and-failure-cases"
+  },"102": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Cross-cutting assumptions",
+    "content": ". | API examples are representative and may omit auth headers for brevity. | Error envelopes follow ApiError (code, message, requestId, timestamp). | Async event timing can vary based on retry/backoff configuration. | . ",
+    "url": "/use-cases-and-failure-scenarios/#cross-cutting-assumptions",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/#cross-cutting-assumptions"
+  },"103": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Use Case 1: Create Order (Idempotent Write)",
+    "content": "Positive case . Client sends: . POST /orders X-Idempotency-Key: checkout-789-user-42 Content-Type: application/json { \"items\": [ {\"productName\": \"USB-C Cable\", \"quantity\": 2, \"price\": 9.99}, {\"productName\": \"Power Adapter\", \"quantity\": 1, \"price\": 19.99} ] } . System behavior: . | OrderService checks regional write policy (RegionalFailoverManager). | Global idempotency lock is attempted in Redis (GlobalIdempotencyService). | Order is persisted with status PENDING. | Outbox row is written in the same transaction. | Response returns 201 Created. | . Example response: . { \"id\": \"6a84f0a9-6ae9-49f8-9538-c5bb6cb4ac3d\", \"status\": \"PENDING\", \"createdAt\": \"2026-04-04T12:10:15Z\", \"items\": [ {\"productName\": \"USB-C Cable\", \"quantity\": 2, \"price\": 9.99}, {\"productName\": \"Power Adapter\", \"quantity\": 1, \"price\": 19.99} ] } . Failure case . Condition: . | Same idempotency key retried during network retry or region failover. | . Expected behavior: . | If already completed, existing order is returned (no duplicate row). | If in-flight lock exists, request fails with conflict message. | If no key is provided, request proceeds without cross-request idempotency reuse. | . Example conflict response: . { \"code\": \"CONFLICT\", \"message\": \"Duplicate request in progress for idempotency key\", \"requestId\": \"4f0d6f02-8bfa-4f6f-b5f7-bbb62da2f847\", \"timestamp\": \"2026-04-04T12:10:18Z\" } . ",
+    "url": "/use-cases-and-failure-scenarios/#use-case-1-create-order-idempotent-write",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/#use-case-1-create-order-idempotent-write"
+  },"104": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Use Case 2: Outbox to Kafka Event Publish",
+    "content": "Positive case . Outbox row payload example: . { \"schemaVersion\": 2, \"eventId\": \"evt-10001\", \"eventType\": \"ORDER_CREATED\", \"orderId\": \"6a84f0a9-6ae9-49f8-9538-c5bb6cb4ac3d\", \"occurredAt\": \"2026-04-04T12:10:15Z\" } . Expected behavior: . | OutboxPublisher claims rows with partition-aware FOR UPDATE SKIP LOCKED. | VersionedJsonOrderCreatedEventSchemaRegistry validates payload contract. | KafkaEventPublisher publishes with key orderId. | Row is marked SENT. | . Failure case . Condition: . | Kafka unavailable. | . Expected behavior: . | Row transitions to FAILED. | retryCount increments. | nextAttemptAt uses exponential backoff. | No event loss because data remains in DB. | Once Kafka recovers, publisher resumes and row transitions to SENT. | . ",
+    "url": "/use-cases-and-failure-scenarios/#use-case-2-outbox-to-kafka-event-publish",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/#use-case-2-outbox-to-kafka-event-publish"
+  },"105": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Use Case 3: Delayed Processing (PENDING -&gt; PROCESSING)",
+    "content": "Positive case . Consumer receives an ORDER_CREATED event older than 5 minutes: . { \"schemaVersion\": 2, \"eventId\": \"evt-10001\", \"eventType\": \"ORDER_CREATED\", \"orderId\": \"6a84f0a9-6ae9-49f8-9538-c5bb6cb4ac3d\", \"occurredAt\": \"2026-04-04T12:10:15Z\" } . Expected behavior: . | Dedupe check in ProcessedEventRepository. | Transition to PROCESSING. | Persist processed marker. | Ack offset manually. | . Failure case . Condition: . | Message arrives too early (before 5-minute delay) or transient DB failure. | . Expected behavior: . | Throws retryable exception. | Retries via topic/backoff policy. | Routes to DLQ only after bounded attempts. | . ",
+    "url": "/use-cases-and-failure-scenarios/#use-case-3-delayed-processing-pending---processing",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/#use-case-3-delayed-processing-pending---processing"
+  },"106": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Use Case 4: Read Order from Cache-Aside Layer",
+    "content": "Positive case . Request: . GET /orders/6a84f0a9-6ae9-49f8-9538-c5bb6cb4ac3d . Expected behavior: . | OrderQueryService checks Redis key order:id:&lt;uuid&gt;. | Cache hit returns quickly. | Metrics: cache.hit.count++. | . Failure case . Condition: . | Redis unavailable. | . Expected behavior: . | RedisCacheProvider logs warning. | Returns empty and falls back to DB. | API still succeeds. | cache.error.count++, redis.connection.failures++. | . ",
+    "url": "/use-cases-and-failure-scenarios/#use-case-4-read-order-from-cache-aside-layer",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/#use-case-4-read-order-from-cache-aside-layer"
+  },"107": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Use Case 5: Distributed Rate Limiting",
+    "content": "Positive case . For user u-42, path /orders, IP 203.0.113.10: . Redis key: . rate_limit:u-42:/orders:203.0.113.10 . Expected behavior: . | Token bucket Lua script allows within capacity. | Request proceeds. | rate_limit.allowed.count++. | . Failure case . Condition: . | Redis script execution fails. | . Expected behavior: . | Fail-open path allows request. | Warning log emitted. | redis.connection.failures{component=rate_limiter}++. | . ",
+    "url": "/use-cases-and-failure-scenarios/#use-case-5-distributed-rate-limiting",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/#use-case-5-distributed-rate-limiting"
+  },"108": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Use Case 6: Multi-Region Failover Write Control",
+    "content": "Positive case . Condition: . | Region healthy; mode is active-passive:active. | . Expected behavior: . | Writes are allowed (OrderService continues). | Region metrics/logs include region_id. | . Failure case . Condition: . | Health checks fail repeatedly (DB/Redis/Kafka) and threshold is reached. | . Expected behavior: . | RegionalFailoverManager changes node state to passive. | failover.events.count++. | Write APIs return service unavailable to prevent split-brain writes. | Read APIs remain available. | . Example response: . { \"code\": \"INFRASTRUCTURE_ERROR\", \"message\": \"Upstream dependency unavailable\", \"requestId\": \"f7fe7b2a-6047-4d01-8f6a-d5f2a1419f8f\", \"timestamp\": \"2026-04-04T12:45:00Z\" } . ",
+    "url": "/use-cases-and-failure-scenarios/#use-case-6-multi-region-failover-write-control",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/#use-case-6-multi-region-failover-write-control"
+  },"109": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Use Case 7: Event Schema Evolution Compatibility",
+    "content": "Positive case (backward compatibility) . Older payload without schemaVersion: . { \"eventId\": \"evt-v1-200\", \"eventType\": \"ORDER_CREATED\", \"orderId\": \"ab9db4da-bf37-4ce5-9349-c6659d2d42d3\", \"occurredAt\": \"2026-04-04T08:00:00Z\" } . Expected behavior: . | Schema registry defaults to v1 parse rules. | Required fields validated. | Processing continues safely. | . Failure case . Condition: . | Missing required field (for example orderId). | . Expected behavior: . | Validation rejects payload. | kafka.schema.validation.errors++. | Invalid event does not progress business state. | . ",
+    "url": "/use-cases-and-failure-scenarios/#use-case-7-event-schema-evolution-compatibility",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/#use-case-7-event-schema-evolution-compatibility"
+  },"110": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Conflict Resolution and Consistency Notes",
+    "content": ". | Cross-region writes are designed with eventual consistency assumptions. | Conflict resolution strategy is configurable for deployments with cross-region overlap policies. | Idempotency and optimistic locking together minimize duplicate effects and stale-write corruption. | . ",
+    "url": "/use-cases-and-failure-scenarios/#conflict-resolution-and-consistency-notes",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/#conflict-resolution-and-consistency-notes"
+  },"111": {
+    "doc": "Use Cases and Failure Scenarios",
+    "title": "Use Cases and Failure Scenarios",
+    "content": " ",
+    "url": "/use-cases-and-failure-scenarios/",
+    
+    "relUrl": "/use-cases-and-failure-scenarios/"
+  }
+}

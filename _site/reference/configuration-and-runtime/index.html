@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Configuration and Runtime</title>
+  <meta name="description" content="Architecture and implementation guide" />
+  <meta name="theme-color" content="#2e8555" />
+  <link rel="stylesheet" href="/assets/css/custom.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lunr/lunr.min.js"></script>
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem("eat-theme");
+      const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      let currentTheme = savedTheme || (systemPrefersDark ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", currentTheme);
+
+      function updateThemeColor(theme) {
+        const themeColor = theme === "dark" ? "#1b1b1d" : "#2e8555";
+        const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+        if (metaThemeColor) metaThemeColor.setAttribute("content", themeColor);
+      }
+
+      function initThemeToggle() {
+        const themeToggle = document.getElementById("theme-toggle");
+        const themeIcon = document.querySelector(".theme-toggle-icon");
+        if (!themeToggle || !themeIcon) return;
+
+        const updateIcon = (theme) => {
+          themeIcon.textContent = theme === "dark" ? "☀️" : "🌙";
+        };
+
+        updateIcon(currentTheme);
+        themeToggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          const newTheme = currentTheme === "dark" ? "light" : "dark";
+          currentTheme = newTheme;
+          document.documentElement.setAttribute("data-theme", newTheme);
+          localStorage.setItem("eat-theme", newTheme);
+          updateThemeColor(newTheme);
+          updateIcon(newTheme);
+        });
+      }
+
+      updateThemeColor(currentTheme);
+      document.addEventListener("DOMContentLoaded", initThemeToggle);
+      initThemeToggle();
+    })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" defer></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      if (!window.mermaid) return;
+
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "loose",
+        theme: "default"
+      });
+
+      const codeBlocks = document.querySelectorAll(
+        "pre code.language-mermaid, pre code.lang-mermaid, pre code.mermaid, code.language-mermaid"
+      );
+
+      codeBlocks.forEach((code) => {
+        const source = code.textContent || "";
+        if (!source.trim()) return;
+        const container = document.createElement("div");
+        container.className = "mermaid";
+        container.textContent = source;
+
+        const pre = code.closest("pre");
+        if (pre) {
+          pre.replaceWith(container);
+        } else {
+          code.replaceWith(container);
+        }
+      });
+
+      const targets = document.querySelectorAll(".mermaid");
+      if (!targets.length) return;
+
+      if (typeof mermaid.run === "function") {
+        mermaid.run({ nodes: targets });
+      } else if (typeof mermaid.init === "function") {
+        mermaid.init(undefined, targets);
+      }
+    });
+  </script>
+</head>
+
+  <body>
+    <header class="site-header" role="banner">
+  <div class="header-content">
+    <a class="site-title" rel="author" href="/">Order Processing System Docs</a>
+    <div class="header-right">
+      <div class="header-icons">
+        <a
+          href="https://github.com/AbhinavT09/OrderProcessingSystem"
+          class="header-github-link"
+          aria-label="GitHub repository"
+          target="_blank"
+          rel="noopener noreferrer"
+        ></a>
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">
+          <span class="theme-toggle-icon">🌙</span>
+        </button>
+      </div>
+      <div class="search-container">
+        <div class="search-input-wrapper">
+          <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d="M10.25 2a8.25 8.25 0 0 1 6.34 13.53l5.69 5.69a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215l-5.69-5.69A8.25 8.25 0 1 1 10.25 2ZM3.5 10.25a6.75 6.75 0 1 0 13.5 0 6.75 6.75 0 0 0-13.5 0Z"
+            ></path>
+          </svg>
+          <input type="text" id="search-input" class="search-input" placeholder="Search..." autocomplete="off" />
+        </div>
+        <div id="search-results" class="search-results hidden"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+    <main class="page-content" aria-label="Content">
+      <div class="docs-layout">
+  <aside class="sidebar" id="sidebar">
+  <nav class="sidebar-nav">
+    <ul class="sidebar-menu">
+      
+      
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/">Home</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/design-and-architecture/">Design and Architecture</a>
+            
+            
+          </li>
+        
+      
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/components-and-tooling/">Components and Tooling</a>
+            
+            
+          </li>
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/observability-and-operations/">Observability and Operations</a>
+            
+            
+          </li>
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/testing-and-quality/">Testing and Quality</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/use-cases-and-failure-scenarios/">Use Cases and Failure Scenarios</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/folder-and-class-reference/">Folder and Class Reference</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/reference/">Reference</a>
+            
+            
+              <ul class="sidebar-submenu">
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/api-layer/">API Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/application-layer/">Application Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/domain-layer/">Domain Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/infrastructure-layer/">Infrastructure Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink active" href="/reference/configuration-and-runtime/">Configuration and Runtime</a>
+                  </li>
+                
+              </ul>
+            
+          </li>
+        
+      
+    </ul>
+  </nav>
+</aside>
+
+  <main class="docs-content">
+    <div class="docs-container">
+      <article class="docs-article">
+        <div class="docs-body">
+          <h1 id="configuration-and-runtime-controls">Configuration and Runtime Controls</h1>
+
+<h2 id="configuration-package-layout">Configuration Package Layout</h2>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">config/security/SecurityConfig</code>
+    <ul>
+      <li>JWT resource server</li>
+      <li>route authorization rules</li>
+      <li>authentication/authorization error responses</li>
+    </ul>
+  </li>
+  <li><code class="language-plaintext highlighter-rouge">config/redis/RedisLettuceConfig</code>
+    <ul>
+      <li>Redis/Lettuce client setup</li>
+      <li>timeout/reconnect/pooling tuning</li>
+    </ul>
+  </li>
+  <li><code class="language-plaintext highlighter-rouge">config/kafka</code>
+    <ul>
+      <li>package reserved for Kafka-focused runtime wiring</li>
+    </ul>
+  </li>
+  <li><code class="language-plaintext highlighter-rouge">config/observability</code>
+    <ul>
+      <li>package reserved for observability-focused runtime wiring</li>
+    </ul>
+  </li>
+</ul>
+
+<h2 id="applicationyml-controls"><code class="language-plaintext highlighter-rouge">application.yml</code> Controls</h2>
+
+<h3 id="outbox-and-publisher-controls">Outbox and publisher controls</h3>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.max-retries</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.backoff-base-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.backoff-max-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.backoff-jitter-percent</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.partition.total</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.partition.instance-id</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.partition.instance-count</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.publisher.poll-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.publisher.batch-size</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.publisher.parallelism</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.publisher.max-in-flight</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.publisher.slow-kafka-threshold-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.cleanup.retention-days</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.outbox.cleanup.poll-ms</code></li>
+</ul>
+
+<h3 id="kafka-publish-and-consumer-controls">Kafka publish and consumer controls</h3>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">app.kafka.order-events-topic</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.kafka.consumer-group</code></li>
+  <li><code class="language-plaintext highlighter-rouge">spring.kafka.producer.transaction-id-prefix</code></li>
+  <li><code class="language-plaintext highlighter-rouge">spring.kafka.producer.properties.enable.idempotence</code></li>
+  <li><code class="language-plaintext highlighter-rouge">spring.kafka.producer.properties.acks</code></li>
+  <li><code class="language-plaintext highlighter-rouge">spring.kafka.producer.properties.max.in.flight.requests.per.connection</code></li>
+  <li><code class="language-plaintext highlighter-rouge">spring.kafka.consumer.properties.isolation.level</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.kafka.processing-delay-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.kafka.processing-delay-multiplier</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.kafka.processing-delay-max-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.kafka.delayed-processing-attempts</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.kafka.publisher.circuit-breaker.failure-threshold</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.kafka.publisher.circuit-breaker.open-seconds</code></li>
+</ul>
+
+<h3 id="multi-region-and-idempotency-controls">Multi-region and idempotency controls</h3>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.enabled</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.region-id</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.failover.mode</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.failover.rto-seconds</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.failover.rpo-seconds</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.auto-failover.poll-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.auto-failover.unhealthy-threshold</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.auto-failover.healthy-threshold</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.health.check-timeout-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.health.redis-latency-threshold-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.health.db-failure-threshold</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.health.redis-failure-threshold</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.health.kafka-failure-threshold</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.global-idempotency.lock-ttl-seconds</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.global-idempotency.completed-ttl-seconds</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.multi-region.consistency.conflict-resolution</code></li>
+</ul>
+
+<h3 id="dynamic-rate-limit-and-backpressure-controls">Dynamic rate-limit and backpressure controls</h3>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">app.security.rate-limit.requests</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.security.rate-limit.window-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.security.rate-limit.policy-cache-ttl-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.query.list-max-rows</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.backpressure.poll-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.backpressure.outbox.elevated-backlog</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.backpressure.outbox.critical-backlog</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.backpressure.kafka.elevated-lag-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.backpressure.kafka.critical-lag-ms</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.backpressure.db.elevated-utilization</code></li>
+  <li><code class="language-plaintext highlighter-rouge">app.backpressure.db.critical-utilization</code></li>
+</ul>
+
+<h2 id="operationally-important-runtime-flags">Operationally Important Runtime Flags</h2>
+
+<ul>
+  <li>idempotency header remains optional; behavior changes when key absent/present</li>
+  <li>passive mode blocks writes but does not block reads</li>
+  <li>outbox retry ceiling and backoff strongly influence event freshness</li>
+  <li>adaptive retry classification influences reattempt pressure and terminalization rates</li>
+  <li>delayed consumer processing settings influence order progression latency</li>
+  <li><code class="language-plaintext highlighter-rouge">read_committed</code> consumer mode avoids uncommitted transactional records</li>
+  <li>backpressure thresholds directly impact write admission and dynamic throttling</li>
+  <li><code class="language-plaintext highlighter-rouge">app.query.list-max-rows</code> bounds legacy list responses to avoid accidental full-result scans</li>
+</ul>
+
+<h2 id="principal-hardening-properties">Principal Hardening Properties</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Property</th>
+      <th>Purpose</th>
+      <th>Default</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">app.outbox.publisher.max-in-flight</code></td>
+      <td>hard cap of concurrent async outbox publishes</td>
+      <td><code class="language-plaintext highlighter-rouge">16</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">app.outbox.publisher.parallelism</code></td>
+      <td>partition worker parallelism</td>
+      <td><code class="language-plaintext highlighter-rouge">8</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">app.query.list-max-rows</code></td>
+      <td>upper bound for legacy <code class="language-plaintext highlighter-rouge">/orders</code> list reads</td>
+      <td><code class="language-plaintext highlighter-rouge">1000</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="runtime-control-feedback-loop">Runtime Control Feedback Loop</h2>
+
+<pre><code class="language-mermaid">flowchart LR
+    CFG[application.yml controls] --&gt; RPF[RateLimitPolicyProvider]
+    CFG --&gt; ARS[AdaptiveRetryPolicyStrategy]
+    CFG --&gt; BPM[BackpressureManager]
+    BPM --&gt; RPF
+    BPM --&gt; OS[OrderService write admission]
+    BPM --&gt; ARS
+    ARS --&gt; ORH[OutboxRetryHandler]
+    ARS --&gt; OCC[OrderCreatedConsumer retry path]
+</code></pre>
+
+<h2 id="transaction-manager-boundaries">Transaction Manager Boundaries</h2>
+
+<ul>
+  <li>Write and read services explicitly bind to DB transaction manager:
+    <ul>
+      <li><code class="language-plaintext highlighter-rouge">OrderService</code>: <code class="language-plaintext highlighter-rouge">@Transactional(transactionManager = "transactionManager")</code></li>
+      <li><code class="language-plaintext highlighter-rouge">OrderQueryService</code>: <code class="language-plaintext highlighter-rouge">@Transactional(transactionManager = "transactionManager", readOnly = true)</code></li>
+    </ul>
+  </li>
+  <li>This is required because Kafka transactional publishing introduces additional transaction managers and implicit selection can become ambiguous.</li>
+</ul>
+
+<h2 id="metrics-touchpoints">Metrics Touchpoints</h2>
+
+<ul>
+  <li>Outbox: <code class="language-plaintext highlighter-rouge">outbox.pending.count</code>, <code class="language-plaintext highlighter-rouge">outbox.failure.count</code>, <code class="language-plaintext highlighter-rouge">outbox.batch.size</code>, <code class="language-plaintext highlighter-rouge">outbox.publish.latency</code>, <code class="language-plaintext highlighter-rouge">outbox.publish.rate</code>, <code class="language-plaintext highlighter-rouge">outbox.lag</code>, <code class="language-plaintext highlighter-rouge">outbox.retry.count</code>.</li>
+  <li>Retry: <code class="language-plaintext highlighter-rouge">retry.delay.ms</code>, <code class="language-plaintext highlighter-rouge">retry.classification.count</code>.</li>
+  <li>Kafka: <code class="language-plaintext highlighter-rouge">kafka.consumer.errors</code>, <code class="language-plaintext highlighter-rouge">kafka.consumer.processed.count</code>, <code class="language-plaintext highlighter-rouge">kafka.consumer.retry.count</code>, <code class="language-plaintext highlighter-rouge">kafka.consumer.dlq.count</code>, <code class="language-plaintext highlighter-rouge">kafka.consumer.lag.ms</code>, <code class="language-plaintext highlighter-rouge">kafka.schema.validation.errors</code>, <code class="language-plaintext highlighter-rouge">kafka.event.version.distribution</code>.</li>
+  <li>Regional resilience: <code class="language-plaintext highlighter-rouge">failover.events.count</code>, <code class="language-plaintext highlighter-rouge">region.health.unhealthy.count</code>, <code class="language-plaintext highlighter-rouge">region.health.dependency.failure.count</code>, <code class="language-plaintext highlighter-rouge">region.health.redis.slow.count</code>, <code class="language-plaintext highlighter-rouge">region.health.redis.latency</code>.</li>
+  <li>Regional consistency: <code class="language-plaintext highlighter-rouge">region.conflict.rejected.count</code>.</li>
+  <li>Backpressure: <code class="language-plaintext highlighter-rouge">backpressure.level</code>, <code class="language-plaintext highlighter-rouge">backpressure.outbox.backlog</code>, <code class="language-plaintext highlighter-rouge">backpressure.kafka.lag.ms</code>, <code class="language-plaintext highlighter-rouge">backpressure.db.saturation.percent</code>.</li>
+  <li>Cache and rate limiting: <code class="language-plaintext highlighter-rouge">cache.hit.count</code>, <code class="language-plaintext highlighter-rouge">cache.miss.count</code>, <code class="language-plaintext highlighter-rouge">cache.error.count</code>, <code class="language-plaintext highlighter-rouge">cache.degraded.mode.count</code>, <code class="language-plaintext highlighter-rouge">rate_limit.allowed.count</code>, <code class="language-plaintext highlighter-rouge">rate_limit.blocked.count</code>, <code class="language-plaintext highlighter-rouge">rate_limit.dynamic.adjustments</code>, <code class="language-plaintext highlighter-rouge">rate_limit.rejections.by.policy</code>.</li>
+</ul>
+
+
+        </div>
+      </article>
+    </div>
+  </main>
+</div>
+
+    </main>
+    <footer class="site-footer">
+  <div class="footer-minimal">
+    <p>Order Processing System documentation</p>
+  </div>
+</footer>
+
+    <script>
+  document.addEventListener("DOMContentLoaded", async function () {
+    const input = document.getElementById("search-input");
+    const resultsEl = document.getElementById("search-results");
+    if (!input || !resultsEl) return;
+
+    let index = null;
+    let docs = [];
+
+    try {
+      const response = await fetch("/search.json");
+      docs = await response.json();
+      index = lunr(function () {
+        this.ref("url");
+        this.field("title", { boost: 10 });
+        this.field("keywords", { boost: 6 });
+        this.field("excerpt", { boost: 4 });
+        this.field("content");
+        docs.forEach((d) => this.add(d));
+      });
+    } catch (_) {
+      return;
+    }
+
+    function render(query) {
+      if (!query.trim()) {
+        resultsEl.classList.add("hidden");
+        resultsEl.innerHTML = "";
+        return;
+      }
+      const hits = index.search(query + "*").slice(0, 8);
+      if (!hits.length) {
+        resultsEl.classList.remove("hidden");
+        resultsEl.innerHTML = '<div class="search-no-results">No results</div>';
+        return;
+      }
+      resultsEl.classList.remove("hidden");
+      resultsEl.innerHTML = hits
+        .map((h) => docs.find((d) => d.url === h.ref))
+        .filter(Boolean)
+        .map((d) => `<a class="search-result-item" href="${d.url}"><div class="search-result-title">${d.title}</div><div class="search-result-excerpt">${d.excerpt || ""}</div></a>`)
+        .join("");
+    }
+
+    input.addEventListener("input", (e) => render(e.target.value));
+    document.addEventListener("click", (e) => {
+      if (!resultsEl.contains(e.target) && e.target !== input) {
+        resultsEl.classList.add("hidden");
+      }
+    });
+  });
+</script>
+
+  </body>
+</html>

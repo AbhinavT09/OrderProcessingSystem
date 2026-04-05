@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design and Architecture</title>
+  <meta name="description" content="Architecture and implementation guide" />
+  <meta name="theme-color" content="#2e8555" />
+  <link rel="stylesheet" href="/assets/css/custom.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lunr/lunr.min.js"></script>
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem("eat-theme");
+      const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      let currentTheme = savedTheme || (systemPrefersDark ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", currentTheme);
+
+      function updateThemeColor(theme) {
+        const themeColor = theme === "dark" ? "#1b1b1d" : "#2e8555";
+        const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+        if (metaThemeColor) metaThemeColor.setAttribute("content", themeColor);
+      }
+
+      function initThemeToggle() {
+        const themeToggle = document.getElementById("theme-toggle");
+        const themeIcon = document.querySelector(".theme-toggle-icon");
+        if (!themeToggle || !themeIcon) return;
+
+        const updateIcon = (theme) => {
+          themeIcon.textContent = theme === "dark" ? "☀️" : "🌙";
+        };
+
+        updateIcon(currentTheme);
+        themeToggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          const newTheme = currentTheme === "dark" ? "light" : "dark";
+          currentTheme = newTheme;
+          document.documentElement.setAttribute("data-theme", newTheme);
+          localStorage.setItem("eat-theme", newTheme);
+          updateThemeColor(newTheme);
+          updateIcon(newTheme);
+        });
+      }
+
+      updateThemeColor(currentTheme);
+      document.addEventListener("DOMContentLoaded", initThemeToggle);
+      initThemeToggle();
+    })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" defer></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      if (!window.mermaid) return;
+
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "loose",
+        theme: "default"
+      });
+
+      const codeBlocks = document.querySelectorAll(
+        "pre code.language-mermaid, pre code.lang-mermaid, pre code.mermaid, code.language-mermaid"
+      );
+
+      codeBlocks.forEach((code) => {
+        const source = code.textContent || "";
+        if (!source.trim()) return;
+        const container = document.createElement("div");
+        container.className = "mermaid";
+        container.textContent = source;
+
+        const pre = code.closest("pre");
+        if (pre) {
+          pre.replaceWith(container);
+        } else {
+          code.replaceWith(container);
+        }
+      });
+
+      const targets = document.querySelectorAll(".mermaid");
+      if (!targets.length) return;
+
+      if (typeof mermaid.run === "function") {
+        mermaid.run({ nodes: targets });
+      } else if (typeof mermaid.init === "function") {
+        mermaid.init(undefined, targets);
+      }
+    });
+  </script>
+</head>
+
+  <body>
+    <header class="site-header" role="banner">
+  <div class="header-content">
+    <a class="site-title" rel="author" href="/">Order Processing System Docs</a>
+    <div class="header-right">
+      <div class="header-icons">
+        <a
+          href="https://github.com/AbhinavT09/OrderProcessingSystem"
+          class="header-github-link"
+          aria-label="GitHub repository"
+          target="_blank"
+          rel="noopener noreferrer"
+        ></a>
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">
+          <span class="theme-toggle-icon">🌙</span>
+        </button>
+      </div>
+      <div class="search-container">
+        <div class="search-input-wrapper">
+          <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d="M10.25 2a8.25 8.25 0 0 1 6.34 13.53l5.69 5.69a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215l-5.69-5.69A8.25 8.25 0 1 1 10.25 2ZM3.5 10.25a6.75 6.75 0 1 0 13.5 0 6.75 6.75 0 0 0-13.5 0Z"
+            ></path>
+          </svg>
+          <input type="text" id="search-input" class="search-input" placeholder="Search..." autocomplete="off" />
+        </div>
+        <div id="search-results" class="search-results hidden"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+    <main class="page-content" aria-label="Content">
+      <div class="docs-layout">
+  <aside class="sidebar" id="sidebar">
+  <nav class="sidebar-nav">
+    <ul class="sidebar-menu">
+      
+      
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/">Home</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link active" href="/design-and-architecture/">Design and Architecture</a>
+            
+            
+          </li>
+        
+      
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/components-and-tooling/">Components and Tooling</a>
+            
+            
+          </li>
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/observability-and-operations/">Observability and Operations</a>
+            
+            
+          </li>
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/testing-and-quality/">Testing and Quality</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/use-cases-and-failure-scenarios/">Use Cases and Failure Scenarios</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/folder-and-class-reference/">Folder and Class Reference</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/reference/">Reference</a>
+            
+            
+              <ul class="sidebar-submenu">
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/api-layer/">API Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/application-layer/">Application Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/domain-layer/">Domain Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/infrastructure-layer/">Infrastructure Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/configuration-and-runtime/">Configuration and Runtime</a>
+                  </li>
+                
+              </ul>
+            
+          </li>
+        
+      
+    </ul>
+  </nav>
+</aside>
+
+  <main class="docs-content">
+    <div class="docs-container">
+      <article class="docs-article">
+        <div class="docs-body">
+          <h1 id="design-and-architecture">Design and Architecture</h1>
+
+<h2 id="1-architectural-principles">1. Architectural Principles</h2>
+
+<p>The service is implemented with <strong>Hexagonal Architecture</strong>, <strong>CQRS</strong>, and <strong>DDD aggregate modeling</strong>.</p>
+
+<ul>
+  <li><strong>Interface layer (<code class="language-plaintext highlighter-rouge">interfaces/http</code>)</strong>: transport contracts, validation, error mapping</li>
+  <li><strong>Application layer (<code class="language-plaintext highlighter-rouge">application/*</code>)</strong>: command/query orchestration, ports, transactional boundaries</li>
+  <li><strong>Domain layer (<code class="language-plaintext highlighter-rouge">domain/order/*</code>)</strong>: aggregate behavior and state transition invariants</li>
+  <li><strong>Infrastructure layer (<code class="language-plaintext highlighter-rouge">infrastructure/*</code>)</strong>: persistence, messaging, cache, security, resilience, crosscutting controls</li>
+</ul>
+
+<p>CQRS split:</p>
+
+<ul>
+  <li><strong>Write side</strong>: <code class="language-plaintext highlighter-rouge">OrderService</code></li>
+  <li><strong>Read side</strong>: <code class="language-plaintext highlighter-rouge">OrderQueryService</code></li>
+</ul>
+
+<h2 id="2-core-design-decisions">2. Core Design Decisions</h2>
+
+<h3 id="21-transactional-outbox-over-direct-kafka-publish">2.1 Transactional Outbox over direct Kafka publish</h3>
+
+<p>Reason: commit order state and integration event atomically from the write transaction perspective.</p>
+
+<ul>
+  <li>Order write and outbox row are persisted in one DB transaction</li>
+  <li>Kafka publication is handled asynchronously by outbox workers</li>
+  <li>Prevents “DB committed, broker send failed” inconsistency</li>
+  <li>Worker claim semantics use explicit outbox leasing (<code class="language-plaintext highlighter-rouge">IN_FLIGHT</code>) with lease-expiry recovery to avoid duplicate concurrent publishers</li>
+</ul>
+
+<h3 id="22-state-pattern-for-order-lifecycle">2.2 State pattern for order lifecycle</h3>
+
+<p>Reason: enforce legal transitions in domain code, not controller/service condition chains.</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">Order</code> delegates behavior to <code class="language-plaintext highlighter-rouge">OrderState</code></li>
+  <li>Concrete states: <code class="language-plaintext highlighter-rouge">PendingState</code>, <code class="language-plaintext highlighter-rouge">ProcessingState</code>, <code class="language-plaintext highlighter-rouge">ShippedState</code>, <code class="language-plaintext highlighter-rouge">DeliveredState</code>, <code class="language-plaintext highlighter-rouge">CancelledState</code></li>
+  <li>Illegal transitions fail with <code class="language-plaintext highlighter-rouge">ConflictException</code></li>
+</ul>
+
+<h3 id="23-global-idempotency-lifecycle-states">2.3 Global idempotency lifecycle states</h3>
+
+<p>Reason: avoid false completion and data loss during partial failures.</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">IN_PROGRESS</code>: request accepted, business write not yet finalized</li>
+  <li><code class="language-plaintext highlighter-rouge">COMPLETED</code>: order commit succeeded and key is mapped to <code class="language-plaintext highlighter-rouge">orderId</code></li>
+  <li>completion is marked after commit via transaction synchronization</li>
+</ul>
+
+<h3 id="24-activepassive-write-gating">2.4 Active/passive write gating</h3>
+
+<p>Reason: prevent unsafe writes during regional dependency instability.</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">RegionalFailoverManager</code> monitors DB/Redis/Kafka health</li>
+  <li>sustained unhealthy thresholds move region to passive</li>
+  <li>write APIs are gated via <code class="language-plaintext highlighter-rouge">allowsWrites()</code></li>
+</ul>
+
+<h3 id="25-transaction-manager-disambiguation">2.5 Transaction manager disambiguation</h3>
+
+<p>Reason: transactional Kafka producer introduces additional transaction manager beans and can make Spring transaction selection ambiguous.</p>
+
+<ul>
+  <li>DB service methods explicitly use <code class="language-plaintext highlighter-rouge">transactionManager</code></li>
+  <li>avoids accidental routing of JPA operations through non-JPA transaction managers</li>
+</ul>
+
+<h2 id="3-consistency-model">3. Consistency Model</h2>
+
+<h3 id="strong-consistency-paths">Strong consistency paths</h3>
+
+<ul>
+  <li>application write contracts use persistence-neutral <code class="language-plaintext highlighter-rouge">OrderRecord</code></li>
+  <li><code class="language-plaintext highlighter-rouge">OrderEntity</code> remains infrastructure-only and is mapped in repository adapters</li>
+  <li>optimistic locking on updates/cancel (<code class="language-plaintext highlighter-rouge">@Version</code>)</li>
+  <li>idempotent create semantics with durable key lifecycle</li>
+</ul>
+
+<h3 id="eventual-consistency-paths">Eventual consistency paths</h3>
+
+<ul>
+  <li>post-create progression to <code class="language-plaintext highlighter-rouge">PROCESSING</code> via Kafka consumer</li>
+  <li>outbox retries/backoff for asynchronous publication</li>
+  <li>retry topics and DLT for consumer-side failure isolation</li>
+</ul>
+
+<h3 id="delivery-contract-explicit">Delivery contract (explicit)</h3>
+
+<ul>
+  <li>producer path is <strong>transactional Kafka publish + transactional outbox</strong>, not distributed XA across DB and Kafka</li>
+  <li>end-to-end delivery guarantee is <strong>at-least-once with idempotent consumption</strong></li>
+  <li>ordering guarantee is <strong>per partition/per order key</strong>, not global total ordering across all orders</li>
+  <li>active-active conflict handling is <strong>version/timestamp/region precedence</strong>, not causal consistency</li>
+  <li>stale outbox workers are fenced by <strong><code class="language-plaintext highlighter-rouge">leaseOwner</code> + <code class="language-plaintext highlighter-rouge">leaseVersion</code></strong> checks on status transitions (<code class="language-plaintext highlighter-rouge">IN_FLIGHT</code> -&gt; <code class="language-plaintext highlighter-rouge">SENT</code>/<code class="language-plaintext highlighter-rouge">FAILED</code>)</li>
+</ul>
+
+<h2 id="4-write-path-architecture">4. Write Path Architecture</h2>
+
+<h3 id="41-create-order-flow">4.1 Create order flow</h3>
+
+<ol>
+  <li>Validate request and authorize endpoint</li>
+  <li>Check regional write mode</li>
+  <li>Resolve idempotency state</li>
+  <li>Persist order + outbox event in one transaction</li>
+  <li>Return response</li>
+  <li>Mark idempotency key <code class="language-plaintext highlighter-rouge">COMPLETED</code> after commit</li>
+</ol>
+
+<h3 id="42-update-and-cancel-flow">4.2 Update and cancel flow</h3>
+
+<ul>
+  <li>retrieve aggregate snapshot</li>
+  <li>apply state transition/cancel behavior in domain model</li>
+  <li>persist with optimistic version checks</li>
+  <li>evict query cache entries</li>
+</ul>
+
+<h3 id="43-bounded-read-flow">4.3 Bounded read flow</h3>
+
+<ul>
+  <li>existing <code class="language-plaintext highlighter-rouge">GET /orders</code> remains backward-compatible</li>
+  <li><code class="language-plaintext highlighter-rouge">GET /orders/page</code> provides bounded page reads (<code class="language-plaintext highlighter-rouge">page</code>, <code class="language-plaintext highlighter-rouge">size</code>) with status filter support</li>
+  <li>server caps page size to prevent unbounded memory pressure on high-cardinality datasets</li>
+  <li>legacy <code class="language-plaintext highlighter-rouge">GET /orders</code> now executes through a bounded repository page (<code class="language-plaintext highlighter-rouge">app.query.list-max-rows</code>) to prevent unbounded heap growth</li>
+</ul>
+
+<h2 id="44-order-creation-idempotency-flow-detailed">4.4 Order Creation Idempotency Flow (Detailed)</h2>
+
+<p>The create path is intentionally conservative because the system accepts retries from clients, API gateways, and load balancers.</p>
+
+<p>Detailed sequence:</p>
+
+<ol>
+  <li>Normalize <code class="language-plaintext highlighter-rouge">X-Idempotency-Key</code> (trim, empty -&gt; null).</li>
+  <li>Resolve global idempotency state from Redis.</li>
+  <li>If state is <code class="language-plaintext highlighter-rouge">COMPLETED</code> and an <code class="language-plaintext highlighter-rouge">orderId</code> exists, load and return the persisted order.</li>
+  <li>If state is <code class="language-plaintext highlighter-rouge">IN_PROGRESS</code>, reject with conflict to prevent duplicate concurrent writes.</li>
+  <li>Mark key <code class="language-plaintext highlighter-rouge">IN_PROGRESS</code> (compare-and-set semantics in Redis).</li>
+  <li>Perform a second local dedupe lookup by idempotency key in the DB.</li>
+  <li>Build domain aggregate from DTO, apply domain invariants, and stamp regional metadata.</li>
+  <li>Persist order snapshot in DB transaction.</li>
+  <li>Serialize and enqueue outbox event in the same DB transaction.</li>
+  <li>Commit DB transaction.</li>
+  <li>After commit callback marks global key <code class="language-plaintext highlighter-rouge">COMPLETED</code> -&gt; <code class="language-plaintext highlighter-rouge">orderId</code>.</li>
+  <li>Return API response (new or deduped existing order).</li>
+</ol>
+
+<pre><code class="language-mermaid">flowchart TD
+    A[POST /orders] --&gt; B[Normalize idempotency key]
+    B --&gt; C{Key present?}
+    C -- No --&gt; N1[Create aggregate]
+    C -- Yes --&gt; D[Resolve Redis idempotency state]
+    D --&gt; E{State}
+    E -- COMPLETED --&gt; F[Load order by orderId and return]
+    E -- IN_PROGRESS --&gt; G[409 conflict]
+    E -- ABSENT --&gt; H[Mark IN_PROGRESS]
+    H --&gt; I{CAS success?}
+    I -- No --&gt; G
+    I -- Yes --&gt; J[DB lookup by idempotency key]
+    J --&gt; K{Exists?}
+    K -- Yes --&gt; L[Return existing order]
+    K -- No --&gt; N1
+    N1 --&gt; N2[DB write order]
+    N2 --&gt; N3[DB write outbox row]
+    N3 --&gt; N4[Commit DB txn]
+    N4 --&gt; N5[After-commit mark COMPLETED in Redis]
+    N5 --&gt; N6[Return 201 Created]
+</code></pre>
+
+<h2 id="10-principal-hardening-p0p1p2">10. Principal Hardening (P0/P1/P2)</h2>
+
+<h3 id="p0-reliability-hardening-implemented">P0 reliability hardening (implemented)</h3>
+
+<ul>
+  <li>outbox publish path is now <strong>completion-aware</strong>: partition workers wait for async broker completions</li>
+  <li>outbox publish concurrency is explicitly bounded by <code class="language-plaintext highlighter-rouge">app.outbox.publisher.max-in-flight</code></li>
+  <li>consumer flow no longer blocks listener threads with <code class="language-plaintext highlighter-rouge">Thread.sleep</code>; retries are delegated to retry-topic orchestration</li>
+  <li>lease fencing uses both owner and version tokens to reject stale callbacks after reclaim</li>
+</ul>
+
+<h3 id="p1-scalability-hardening-implemented">P1 scalability hardening (implemented)</h3>
+
+<ul>
+  <li>list APIs are bounded by design (<code class="language-plaintext highlighter-rouge">/orders/page</code> and bounded fallback for <code class="language-plaintext highlighter-rouge">/orders</code>)</li>
+  <li>cache/list semantics remain backward compatible while protecting against high-cardinality full scans</li>
+</ul>
+
+<h3 id="p2-operational-hardening-documentation--observability">P2 operational hardening (documentation + observability)</h3>
+
+<ul>
+  <li>explicit chaos/load test scenarios are now documented and tied to measurable SLO signals</li>
+  <li>runtime dashboards map directly to outbox reclaim safety, DLQ drift, and backpressure transitions</li>
+</ul>
+
+<h2 id="5-outbox-publication-pipeline">5. Outbox Publication Pipeline</h2>
+
+<p>Components:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">OutboxPublisher</code>: scheduler + backpressure + worker orchestration</li>
+  <li><code class="language-plaintext highlighter-rouge">OutboxFetcher</code>: partition-aware due row claim</li>
+  <li><code class="language-plaintext highlighter-rouge">OutboxProcessor</code>: async publish + success transition</li>
+  <li><code class="language-plaintext highlighter-rouge">OutboxRetryHandler</code>: retry policy and next-attempt scheduling</li>
+</ul>
+
+<p>Behavioral properties:</p>
+
+<ul>
+  <li>bounded in-flight workers</li>
+  <li>bounded batch claim size</li>
+  <li>deterministic row ordering within processing batch</li>
+  <li>atomic lease transition (<code class="language-plaintext highlighter-rouge">PENDING</code>/<code class="language-plaintext highlighter-rouge">FAILED</code> -&gt; <code class="language-plaintext highlighter-rouge">IN_FLIGHT</code>) before worker release</li>
+  <li>lease timeout recovery for crashed workers</li>
+  <li>at-least-once delivery with consumer dedupe</li>
+</ul>
+
+<p>Detailed pipeline:</p>
+
+<ol>
+  <li>Scheduler selects only partitions owned by current instance.</li>
+  <li>Worker permit is acquired (bounded concurrency).</li>
+  <li>Fetcher claims due rows with <code class="language-plaintext highlighter-rouge">FOR UPDATE SKIP LOCKED</code> semantics.</li>
+  <li>Claimed rows are transitioned to <code class="language-plaintext highlighter-rouge">IN_FLIGHT</code> and assigned <code class="language-plaintext highlighter-rouge">leaseOwner + leaseVersion</code>.</li>
+  <li>Processor starts async publish per row (bounded in-flight publish semaphore).</li>
+  <li>Success callback attempts <code class="language-plaintext highlighter-rouge">markSentIfLeased(id, owner, version, ...)</code>.</li>
+  <li>If fenced update fails, callback is stale and safely ignored.</li>
+  <li>Failure callback runs adaptive retry policy and persists <code class="language-plaintext highlighter-rouge">FAILED + nextAttemptAt</code> with lease fencing.</li>
+  <li>Worker releases permit only after batch completion future resolves.</li>
+</ol>
+
+<pre><code class="language-mermaid">flowchart TD
+    P1[OutboxPublisher poll] --&gt; P2[Acquire worker permit]
+    P2 --&gt; P3[Claim partition batch]
+    P3 --&gt; P4[Set IN_FLIGHT + leaseOwner + leaseVersion]
+    P4 --&gt; P5[Async publish]
+    P5 --&gt; P6{Publish result}
+    P6 -- Success --&gt; P7[Fenced markSentIfLeased]
+    P6 -- Failure --&gt; P8[Adaptive retry plan]
+    P8 --&gt; P9[Fenced markFailedIfLeased]
+    P7 --&gt; P10[Release permit after completion]
+    P9 --&gt; P10
+</code></pre>
+
+<h2 id="51-lease-fencing-and-stale-worker-protection">5.1 Lease Fencing and Stale Worker Protection</h2>
+
+<ul>
+  <li>Lease owner is unique per claim cycle and partition worker.</li>
+  <li>Lease version increments on every claim.</li>
+  <li>Success/failure transitions require both owner and version match.</li>
+  <li>Any delayed callback from an expired lease cannot mutate the row.</li>
+  <li>This is the core anti-duplication guarantee for asynchronous publication races.</li>
+</ul>
+
+<h2 id="52-eventual-consistency-contract">5.2 Eventual Consistency Contract</h2>
+
+<ul>
+  <li>Command write commit and outbox insert are strongly consistent within one DB transaction.</li>
+  <li>Kafka publication is asynchronous and eventually consistent.</li>
+  <li>Consumer dedup markers enforce idempotent state application.</li>
+  <li>End-to-end contract is at-least-once delivery with idempotent consume.</li>
+</ul>
+
+<h2 id="53-regional-failover-decision-tree">5.3 Regional Failover Decision Tree</h2>
+
+<pre><code class="language-mermaid">flowchart TD
+    R1[Periodic health probe] --&gt; R2[Check DB]
+    R2 --&gt; R3[Check Redis]
+    R3 --&gt; R4[Check Kafka]
+    R4 --&gt; R5{All healthy?}
+    R5 -- Yes --&gt; R6[Increment healthy streak]
+    R5 -- No --&gt; R7[Increment unhealthy streak]
+    R7 --&gt; R8{Unhealthy threshold crossed?}
+    R8 -- Yes --&gt; R9[Switch to PASSIVE]
+    R8 -- No --&gt; R10[Remain current mode]
+    R6 --&gt; R11{Recovery threshold crossed?}
+    R11 -- Yes --&gt; R12[Switch to ACTIVE]
+    R11 -- No --&gt; R10
+    R9 --&gt; R13[Write gating enabled]
+    R12 --&gt; R14[Write gating disabled]
+</code></pre>
+
+<h2 id="54-backpressure-propagation-and-adaptive-throttling">5.4 Backpressure Propagation and Adaptive Throttling</h2>
+
+<pre><code class="language-mermaid">flowchart LR
+    B1[kafka.consumer.lag.ms] --&gt; BM[BackpressureManager]
+    B2[outbox.pending + outbox.failed] --&gt; BM
+    B3[db.saturation] --&gt; BM
+    BM --&gt; B4{Pressure level}
+    B4 --&gt;|Moderate| B5[Tighten dynamic rate limits]
+    B4 --&gt;|High| B6[Increase retry delays]
+    B4 --&gt;|Critical| B7[Write gating / reject writes]
+</code></pre>
+
+<h2 id="55-cross-region-hlc-conflict-resolution-flow">5.5 Cross-Region HLC Conflict Resolution Flow</h2>
+
+<p>Hybrid Logical Clock (HLC) hardening replaces pure wall-clock ordering in conflict resolution.
+Each candidate update is evaluated as a tuple: <code class="language-plaintext highlighter-rouge">(physicalMillis, logicalCounter)</code>.</p>
+
+<p>Winning rule:</p>
+
+<ul>
+  <li>incoming wins when <code class="language-plaintext highlighter-rouge">incoming.physicalMillis &gt; current.physicalMillis</code></li>
+  <li>incoming wins when physical values are equal and <code class="language-plaintext highlighter-rouge">incoming.logicalCounter &gt; current.logicalCounter</code></li>
+  <li>ties are broken deterministically by region id to prevent non-deterministic outcomes</li>
+</ul>
+
+<p>This avoids false overwrite decisions caused by NTP drift when regions disagree on wall clock by small offsets.</p>
+
+<pre><code class="language-mermaid">flowchart TD
+    H1[Incoming regional update] --&gt; H2[Build incoming HLC from occurredAt + version]
+    H2 --&gt; H3[Build current HLC from persisted lastUpdatedTimestamp + version]
+    H3 --&gt; H4{incoming HLC &gt; current HLC?}
+    H4 -- Yes --&gt; H5[Apply update]
+    H4 -- No --&gt; H6{incoming HLC == current HLC?}
+    H6 -- No --&gt; H7[Reject as stale]
+    H6 -- Yes --&gt; H8[Region-id tie breaker]
+    H8 --&gt; H9{Incoming region &gt;= current region?}
+    H9 -- Yes --&gt; H5
+    H9 -- No --&gt; H7
+</code></pre>
+
+<h2 id="6-kafka-consume-and-dedupe-architecture">6. Kafka Consume and Dedupe Architecture</h2>
+
+<p><code class="language-plaintext highlighter-rouge">OrderCreatedConsumer</code> provides:</p>
+
+<ul>
+  <li>schema validation/deserialization</li>
+  <li>delayed processing enforcement window</li>
+  <li>transactional dedupe marker + state transition</li>
+  <li>retry topic routing for transient conditions</li>
+  <li>DLT handling with structured diagnostics</li>
+</ul>
+
+<p><code class="language-plaintext highlighter-rouge">processed_events</code> table is the idempotent-consume anchor.</p>
+
+<h2 id="7-redis-usage-model">7. Redis Usage Model</h2>
+
+<h3 id="query-cache">Query cache</h3>
+
+<ul>
+  <li>adapter: <code class="language-plaintext highlighter-rouge">RedisCacheProvider</code></li>
+  <li>cache-aside read strategy</li>
+  <li>soft-fail fallback to DB</li>
+  <li>local circuit-breaker behavior during repeated Redis faults</li>
+  <li>TTL jitter for synchronized-expiry reduction</li>
+</ul>
+
+<h3 id="rate-limiting">Rate limiting</h3>
+
+<ul>
+  <li>filter: <code class="language-plaintext highlighter-rouge">RateLimitingFilter</code></li>
+  <li>token bucket in Lua for atomic refill/consume</li>
+  <li>distributed key scope (<code class="language-plaintext highlighter-rouge">user:path:ip</code>)</li>
+  <li>fail-open during Redis degradation to preserve availability</li>
+</ul>
+
+<h2 id="8-security-model">8. Security Model</h2>
+
+<ul>
+  <li>resource server JWT validation</li>
+  <li>role claim conversion to Spring authorities</li>
+  <li>endpoint-level access controls in <code class="language-plaintext highlighter-rouge">SecurityConfig</code></li>
+  <li>normalized API error envelope with correlation id</li>
+</ul>
+
+<h2 id="9-failure-matrix">9. Failure Matrix</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Failure mode</th>
+      <th>Defensive mechanism</th>
+      <th>Observable outcome</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>create transaction fails</td>
+      <td>transactional rollback</td>
+      <td>no order, no outbox row</td>
+    </tr>
+    <tr>
+      <td>broker unavailable</td>
+      <td>outbox lease + adaptive retries/backoff</td>
+      <td>pending/in-flight/failed backlog grows then drains</td>
+    </tr>
+    <tr>
+      <td>duplicate Kafka delivery</td>
+      <td>processed-event dedupe</td>
+      <td>idempotent consume, no repeated transition</td>
+    </tr>
+    <tr>
+      <td>Redis cache failure</td>
+      <td>fail-soft cache adapter</td>
+      <td>DB fallback, increased cache error metrics</td>
+    </tr>
+    <tr>
+      <td>rate limiter Redis failure</td>
+      <td>fail-open policy</td>
+      <td>API remains available</td>
+    </tr>
+    <tr>
+      <td>stale concurrent write</td>
+      <td>optimistic locking</td>
+      <td>conflict response</td>
+    </tr>
+    <tr>
+      <td>prolonged dependency outage</td>
+      <td>active/passive failover</td>
+      <td>writes rejected in passive region</td>
+    </tr>
+  </tbody>
+</table>
+
+
+
+        </div>
+      </article>
+    </div>
+  </main>
+</div>
+
+    </main>
+    <footer class="site-footer">
+  <div class="footer-minimal">
+    <p>Order Processing System documentation</p>
+  </div>
+</footer>
+
+    <script>
+  document.addEventListener("DOMContentLoaded", async function () {
+    const input = document.getElementById("search-input");
+    const resultsEl = document.getElementById("search-results");
+    if (!input || !resultsEl) return;
+
+    let index = null;
+    let docs = [];
+
+    try {
+      const response = await fetch("/search.json");
+      docs = await response.json();
+      index = lunr(function () {
+        this.ref("url");
+        this.field("title", { boost: 10 });
+        this.field("keywords", { boost: 6 });
+        this.field("excerpt", { boost: 4 });
+        this.field("content");
+        docs.forEach((d) => this.add(d));
+      });
+    } catch (_) {
+      return;
+    }
+
+    function render(query) {
+      if (!query.trim()) {
+        resultsEl.classList.add("hidden");
+        resultsEl.innerHTML = "";
+        return;
+      }
+      const hits = index.search(query + "*").slice(0, 8);
+      if (!hits.length) {
+        resultsEl.classList.remove("hidden");
+        resultsEl.innerHTML = '<div class="search-no-results">No results</div>';
+        return;
+      }
+      resultsEl.classList.remove("hidden");
+      resultsEl.innerHTML = hits
+        .map((h) => docs.find((d) => d.url === h.ref))
+        .filter(Boolean)
+        .map((d) => `<a class="search-result-item" href="${d.url}"><div class="search-result-title">${d.title}</div><div class="search-result-excerpt">${d.excerpt || ""}</div></a>`)
+        .join("");
+    }
+
+    input.addEventListener("input", (e) => render(e.target.value));
+    document.addEventListener("click", (e) => {
+      if (!resultsEl.contains(e.target) && e.target !== input) {
+        resultsEl.classList.add("hidden");
+      }
+    });
+  });
+</script>
+
+  </body>
+</html>

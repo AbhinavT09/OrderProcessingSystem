@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Application Layer</title>
+  <meta name="description" content="Architecture and implementation guide" />
+  <meta name="theme-color" content="#2e8555" />
+  <link rel="stylesheet" href="/assets/css/custom.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lunr/lunr.min.js"></script>
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem("eat-theme");
+      const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      let currentTheme = savedTheme || (systemPrefersDark ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", currentTheme);
+
+      function updateThemeColor(theme) {
+        const themeColor = theme === "dark" ? "#1b1b1d" : "#2e8555";
+        const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+        if (metaThemeColor) metaThemeColor.setAttribute("content", themeColor);
+      }
+
+      function initThemeToggle() {
+        const themeToggle = document.getElementById("theme-toggle");
+        const themeIcon = document.querySelector(".theme-toggle-icon");
+        if (!themeToggle || !themeIcon) return;
+
+        const updateIcon = (theme) => {
+          themeIcon.textContent = theme === "dark" ? "☀️" : "🌙";
+        };
+
+        updateIcon(currentTheme);
+        themeToggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          const newTheme = currentTheme === "dark" ? "light" : "dark";
+          currentTheme = newTheme;
+          document.documentElement.setAttribute("data-theme", newTheme);
+          localStorage.setItem("eat-theme", newTheme);
+          updateThemeColor(newTheme);
+          updateIcon(newTheme);
+        });
+      }
+
+      updateThemeColor(currentTheme);
+      document.addEventListener("DOMContentLoaded", initThemeToggle);
+      initThemeToggle();
+    })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" defer></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      if (!window.mermaid) return;
+
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "loose",
+        theme: "default"
+      });
+
+      const codeBlocks = document.querySelectorAll(
+        "pre code.language-mermaid, pre code.lang-mermaid, pre code.mermaid, code.language-mermaid"
+      );
+
+      codeBlocks.forEach((code) => {
+        const source = code.textContent || "";
+        if (!source.trim()) return;
+        const container = document.createElement("div");
+        container.className = "mermaid";
+        container.textContent = source;
+
+        const pre = code.closest("pre");
+        if (pre) {
+          pre.replaceWith(container);
+        } else {
+          code.replaceWith(container);
+        }
+      });
+
+      const targets = document.querySelectorAll(".mermaid");
+      if (!targets.length) return;
+
+      if (typeof mermaid.run === "function") {
+        mermaid.run({ nodes: targets });
+      } else if (typeof mermaid.init === "function") {
+        mermaid.init(undefined, targets);
+      }
+    });
+  </script>
+</head>
+
+  <body>
+    <header class="site-header" role="banner">
+  <div class="header-content">
+    <a class="site-title" rel="author" href="/">Order Processing System Docs</a>
+    <div class="header-right">
+      <div class="header-icons">
+        <a
+          href="https://github.com/AbhinavT09/OrderProcessingSystem"
+          class="header-github-link"
+          aria-label="GitHub repository"
+          target="_blank"
+          rel="noopener noreferrer"
+        ></a>
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">
+          <span class="theme-toggle-icon">🌙</span>
+        </button>
+      </div>
+      <div class="search-container">
+        <div class="search-input-wrapper">
+          <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d="M10.25 2a8.25 8.25 0 0 1 6.34 13.53l5.69 5.69a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215l-5.69-5.69A8.25 8.25 0 1 1 10.25 2ZM3.5 10.25a6.75 6.75 0 1 0 13.5 0 6.75 6.75 0 0 0-13.5 0Z"
+            ></path>
+          </svg>
+          <input type="text" id="search-input" class="search-input" placeholder="Search..." autocomplete="off" />
+        </div>
+        <div id="search-results" class="search-results hidden"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+    <main class="page-content" aria-label="Content">
+      <div class="docs-layout">
+  <aside class="sidebar" id="sidebar">
+  <nav class="sidebar-nav">
+    <ul class="sidebar-menu">
+      
+      
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/">Home</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/design-and-architecture/">Design and Architecture</a>
+            
+            
+          </li>
+        
+      
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/components-and-tooling/">Components and Tooling</a>
+            
+            
+          </li>
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/observability-and-operations/">Observability and Operations</a>
+            
+            
+          </li>
+        
+      
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/testing-and-quality/">Testing and Quality</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/use-cases-and-failure-scenarios/">Use Cases and Failure Scenarios</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/folder-and-class-reference/">Folder and Class Reference</a>
+            
+            
+          </li>
+        
+      
+        
+          
+          
+          
+          <li class="sidebar-item">
+            <a class="sidebar-link" href="/reference/">Reference</a>
+            
+            
+              <ul class="sidebar-submenu">
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/api-layer/">API Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink active" href="/reference/application-layer/">Application Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/domain-layer/">Domain Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/infrastructure-layer/">Infrastructure Layer</a>
+                  </li>
+                
+                  
+                  
+                  
+                  <li class="sidebar-subitem">
+                    <a class="sidebar-sublink" href="/reference/configuration-and-runtime/">Configuration and Runtime</a>
+                  </li>
+                
+              </ul>
+            
+          </li>
+        
+      
+    </ul>
+  </nav>
+</aside>
+
+  <main class="docs-content">
+    <div class="docs-container">
+      <article class="docs-article">
+        <div class="docs-body">
+          <h1 id="application-layer-reference">Application Layer Reference</h1>
+
+<h2 id="layer-purpose">Layer Purpose</h2>
+
+<p>Application services orchestrate use-cases, transactions, and infrastructure ports while keeping domain logic and transport concerns separate.</p>
+
+<h2 id="service-responsibilities">Service Responsibilities</h2>
+
+<h3 id="orderservice-commandwrite-side"><code class="language-plaintext highlighter-rouge">OrderService</code> (command/write side)</h3>
+
+<ul>
+  <li>Enforces regional write gating via <code class="language-plaintext highlighter-rouge">RegionalFailoverManager</code></li>
+  <li>Implements idempotency lifecycle flow:
+    <ul>
+      <li>resolve key state (<code class="language-plaintext highlighter-rouge">IN_PROGRESS</code>/<code class="language-plaintext highlighter-rouge">COMPLETED</code>/absent)</li>
+      <li>reserve <code class="language-plaintext highlighter-rouge">IN_PROGRESS</code></li>
+      <li>persist order + outbox</li>
+      <li>mark <code class="language-plaintext highlighter-rouge">COMPLETED</code> after commit</li>
+    </ul>
+  </li>
+  <li>Uses optimistic locking and retry semantics for status/cancel mutations</li>
+  <li>Invalidates read cache keys after successful writes</li>
+</ul>
+
+<h3 id="orderqueryservice-queryread-side"><code class="language-plaintext highlighter-rouge">OrderQueryService</code> (query/read side)</h3>
+
+<ul>
+  <li>Cache-aside read orchestration for by-id and filtered-list calls</li>
+  <li>Coalesces concurrent cache misses by key to avoid thundering herd</li>
+  <li>Emits query timing/error metrics</li>
+  <li>Falls back to repository results when cache is degraded</li>
+</ul>
+
+<h3 id="outboxservice"><code class="language-plaintext highlighter-rouge">OutboxService</code></h3>
+
+<ul>
+  <li>Creates <code class="language-plaintext highlighter-rouge">OutboxEntity</code> rows with:
+    <ul>
+      <li>event payload from schema registry</li>
+      <li>initial <code class="language-plaintext highlighter-rouge">PENDING</code> status</li>
+      <li>partition key for publisher sharding</li>
+    </ul>
+  </li>
+</ul>
+
+<h2 id="ports">Ports</h2>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">OrderRepository</code>: order persistence contract over application snapshots (<code class="language-plaintext highlighter-rouge">OrderRecord</code>, <code class="language-plaintext highlighter-rouge">OrderItemRecord</code>) rather than infrastructure entities</li>
+  <li><code class="language-plaintext highlighter-rouge">OutboxRepository</code>: outbox persistence/claim/archive contract</li>
+  <li><code class="language-plaintext highlighter-rouge">ProcessedEventRepository</code>: consumer dedupe marker contract</li>
+  <li><code class="language-plaintext highlighter-rouge">EventPublisher</code>: async integration event publication contract</li>
+  <li><code class="language-plaintext highlighter-rouge">CacheProvider</code>: cache-aside operations contract</li>
+</ul>
+
+<h2 id="key-application-invariants">Key Application Invariants</h2>
+
+<ul>
+  <li>Writes are blocked when regional mode is passive</li>
+  <li>Order create does not directly publish Kafka events</li>
+  <li>Idempotency completion is recorded only after successful commit</li>
+  <li>Query reads remain available during cache failures</li>
+</ul>
+
+
+        </div>
+      </article>
+    </div>
+  </main>
+</div>
+
+    </main>
+    <footer class="site-footer">
+  <div class="footer-minimal">
+    <p>Order Processing System documentation</p>
+  </div>
+</footer>
+
+    <script>
+  document.addEventListener("DOMContentLoaded", async function () {
+    const input = document.getElementById("search-input");
+    const resultsEl = document.getElementById("search-results");
+    if (!input || !resultsEl) return;
+
+    let index = null;
+    let docs = [];
+
+    try {
+      const response = await fetch("/search.json");
+      docs = await response.json();
+      index = lunr(function () {
+        this.ref("url");
+        this.field("title", { boost: 10 });
+        this.field("keywords", { boost: 6 });
+        this.field("excerpt", { boost: 4 });
+        this.field("content");
+        docs.forEach((d) => this.add(d));
+      });
+    } catch (_) {
+      return;
+    }
+
+    function render(query) {
+      if (!query.trim()) {
+        resultsEl.classList.add("hidden");
+        resultsEl.innerHTML = "";
+        return;
+      }
+      const hits = index.search(query + "*").slice(0, 8);
+      if (!hits.length) {
+        resultsEl.classList.remove("hidden");
+        resultsEl.innerHTML = '<div class="search-no-results">No results</div>';
+        return;
+      }
+      resultsEl.classList.remove("hidden");
+      resultsEl.innerHTML = hits
+        .map((h) => docs.find((d) => d.url === h.ref))
+        .filter(Boolean)
+        .map((d) => `<a class="search-result-item" href="${d.url}"><div class="search-result-title">${d.title}</div><div class="search-result-excerpt">${d.excerpt || ""}</div></a>`)
+        .join("");
+    }
+
+    input.addEventListener("input", (e) => render(e.target.value));
+    document.addEventListener("click", (e) => {
+      if (!resultsEl.contains(e.target) && e.target !== input) {
+        resultsEl.classList.add("hidden");
+      }
+    });
+  });
+</script>
+
+  </body>
+</html>
