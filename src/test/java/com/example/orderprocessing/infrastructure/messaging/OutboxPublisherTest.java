@@ -38,9 +38,9 @@ class OutboxPublisherTest {
         event.setAggregateId("order-1");
         event.setCreatedAt(Instant.now());
         when(fetcher.claimPartitionBatch(eq(0), eq(12), eq(100))).thenReturn(List.of(event));
-        when(fetcher.claimPartitionBatch(eq(1), eq(12), eq(100))).thenReturn(List.of());
         when(processor.processBatch(List.of(event))).thenReturn(CompletableFuture.completedFuture(null));
 
+        // With instanceCount=1, every index 0..totalPartitions-1 is owned; use one partition so p=1 is never polled.
         OutboxPublisher publisher = new OutboxPublisher(
                 repository,
                 fetcher,
@@ -51,7 +51,7 @@ class OutboxPublisherTest {
                 100,
                 1,
                 1,
-                2,
+                1,
                 0,
                 1,
                 1500,
