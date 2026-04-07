@@ -2,12 +2,17 @@ package com.example.orderprocessing.interfaces.http.exception;
 
 import com.example.orderprocessing.interfaces.http.error.ApiError;
 import com.example.orderprocessing.application.exception.ConflictException;
+import com.example.orderprocessing.application.exception.ForbiddenException;
 import com.example.orderprocessing.application.exception.InfrastructureException;
 import com.example.orderprocessing.application.exception.NotFoundException;
 import com.example.orderprocessing.infrastructure.web.RequestContextFilter;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.ConstraintViolationException;
 import java.time.Instant;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,6 +29,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * preserving request correlation id for traceability.</p>
  */
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    private final Counter unexpectedErrorCounter;
+
+    public GlobalExceptionHandler(MeterRegistry meterRegistry) {
+        this.unexpectedErrorCounter = meterRegistry.counter("api.errors.unexpected");
+    }
 
     @ExceptionHandler(NotFoundException.class)
     /**
@@ -45,6 +58,17 @@ public class GlobalExceptionHandler {
      */
     public ResponseEntity<ApiError> handleConflict(ConflictException ex) {
         return build(HttpStatus.CONFLICT, "CONFLICT", ex.getMessage());
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    /**
+     * Maps authorization failures to {@code 403 FORBIDDEN}.
+     *
+     * @param ex operation not allowed for caller
+     * @return standardized API error response
+     */
+    public ResponseEntity<ApiError> handleForbidden(ForbiddenException ex) {
+        return build(HttpStatus.FORBIDDEN, "FORBIDDEN", ex.getMessage());
     }
 
     @ExceptionHandler(InfrastructureException.class)
@@ -113,6 +137,8 @@ public class GlobalExceptionHandler {
      * @return standardized API error response with generic message
      */
     public ResponseEntity<ApiError> handleUnexpected(Exception ex) {
+        unexpectedErrorCounter.increment();
+        log.error("Unhandled exception", ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "UNEXPECTED_ERROR", "Unexpected server error");
     }
 

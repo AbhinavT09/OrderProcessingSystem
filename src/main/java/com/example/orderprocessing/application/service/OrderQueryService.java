@@ -80,17 +80,28 @@ public class OrderQueryService {
      * <p>On cache miss, loads from repository and caches result with by-id TTL.
      * Concurrent misses for the same key are coalesced to one backing read.</p>
      *
+     * <p>Non-admin callers only resolve orders they own ({@code ownerSubject} match); others receive
+     * {@link NotFoundException} to avoid leaking existence.</p>
+     *
      * @param id order identifier
+     * @param viewerSubject authenticated principal name (JWT {@code sub})
+     * @param viewerIsAdmin when {@code true}, any order id may be loaded
      * @return order response
      */
-    public OrderResponse getById(UUID id) {
+    public OrderResponse getById(UUID id, String viewerSubject, boolean viewerIsAdmin) {
         requestCounter.increment();
         return queryTimer.record(() -> {
             try {
-                String key = orderCacheKey(id);
+                String key = viewerIsAdmin
+                        ? OrderReadCacheKeys.orderByIdAdmin(id)
+                        : OrderReadCacheKeys.orderByIdUser(viewerSubject, id);
                 return cacheProvider.get(key, OrderResponse.class)
                         .orElseGet(() -> coalescedOrderLoad(key, () -> {
-                            OrderResponse loaded = mapper.toResponse(mapper.toDomain(findEntity(id)));
+                            OrderRecord record = viewerIsAdmin
+                                    ? findEntity(id)
+                                    : orderRepository.findByIdAndOwnerSubject(id, viewerSubject).orElseThrow(
+                                            () -> new NotFoundException("Order not found: " + id));
+                            OrderResponse loaded = mapper.toResponse(mapper.toDomain(record));
                             cacheProvider.put(key, loaded, orderByIdTtl);
                             return loaded;
                         }));
@@ -108,21 +119,34 @@ public class OrderQueryService {
      * <p>Uses status-scoped cache entries and coalesces concurrent misses to avoid thundering herd
      * behavior on expensive list queries.</p>
      *
-     * @param status optional status filter, or {@code null} for all orders
+     * <p>Non-admin callers only see orders they created.</p>
+     *
+     * @param status optional status filter, or {@code null} for all orders for this viewer
+     * @param viewerSubject authenticated principal name (JWT {@code sub})
+     * @param viewerIsAdmin when {@code true}, returns orders across all owners (bounded by list max rows)
      * @return order responses for the selected scope
      */
-    public List<OrderResponse> list(OrderStatus status) {
+    public List<OrderResponse> list(OrderStatus status, String viewerSubject, boolean viewerIsAdmin) {
         requestCounter.increment();
         return queryTimer.record(() -> {
             try {
-                String key = statusCacheKey(status);
+                String key = viewerIsAdmin
+                        ? OrderReadCacheKeys.listByStatusAdmin(status)
+                        : OrderReadCacheKeys.listByStatusUser(viewerSubject, status);
                 return cacheProvider.get(key, CachedOrderList.class)
                         .map(CachedOrderList::orders)
                         .orElseGet(() -> coalescedStatusLoad(key, () -> {
                             var pageable = PageRequest.of(0, listMaxRows, Sort.by("createdAt").ascending());
-                            var page = recordDbQuery("orders.list", () -> status == null
-                                    ? orderRepository.findAll(pageable)
-                                    : orderRepository.findByStatus(status, pageable));
+                            var page = recordDbQuery("orders.list", () -> {
+                                if (viewerIsAdmin) {
+                                    return status == null
+                                            ? orderRepository.findAll(pageable)
+                                            : orderRepository.findByStatus(status, pageable);
+                                }
+                                return status == null
+                                        ? orderRepository.findByOwnerSubject(viewerSubject, pageable)
+                                        : orderRepository.findByOwnerSubjectAndStatus(viewerSubject, status, pageable);
+                            });
                             List<OrderRecord> orders = page.getContent();
                             List<OrderResponse> loaded = orders.stream().map(mapper::toDomain).map(mapper::toResponse).toList();
                             cacheProvider.put(key, new CachedOrderList(loaded), orderListTtl);
@@ -136,16 +160,26 @@ public class OrderQueryService {
     }
 
     @Transactional(transactionManager = "transactionManager", readOnly = true)
-    public PagedOrderResult listPage(OrderStatus status, int page, int size) {
+    /**
+     * Paginated list; non-admin callers only see their own orders.
+     */
+    public PagedOrderResult listPage(OrderStatus status, int page, int size, String viewerSubject, boolean viewerIsAdmin) {
         requestCounter.increment();
         return queryTimer.record(() -> {
             try {
                 int normalizedPage = Math.max(0, page);
                 int normalizedSize = Math.min(500, Math.max(1, size));
                 var pageable = PageRequest.of(normalizedPage, normalizedSize, Sort.by("createdAt").ascending());
-                var results = recordDbQuery("orders.list.page", () -> status == null
-                        ? orderRepository.findAll(pageable)
-                        : orderRepository.findByStatus(status, pageable));
+                var results = recordDbQuery("orders.list.page", () -> {
+                    if (viewerIsAdmin) {
+                        return status == null
+                                ? orderRepository.findAll(pageable)
+                                : orderRepository.findByStatus(status, pageable);
+                    }
+                    return status == null
+                            ? orderRepository.findByOwnerSubject(viewerSubject, pageable)
+                            : orderRepository.findByOwnerSubjectAndStatus(viewerSubject, status, pageable);
+                });
                 List<OrderResponse> orders = results.getContent().stream()
                         .map(mapper::toDomain)
                         .map(mapper::toResponse)
@@ -213,14 +247,6 @@ public class OrderQueryService {
         } finally {
             keyLocks.remove(key, lock);
         }
-    }
-
-    private String orderCacheKey(UUID id) {
-        return "order:id:" + id;
-    }
-
-    private String statusCacheKey(OrderStatus status) {
-        return "orders:status:" + (status == null ? "ALL" : status.name());
     }
 
     public record PagedOrderResult(

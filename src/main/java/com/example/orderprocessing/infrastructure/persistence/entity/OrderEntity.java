@@ -48,6 +48,10 @@ public class OrderEntity {
     @Column(length = 128)
     private String idempotencyKey;
 
+    /** JWT subject (or equivalent) of the principal who created the order; null for legacy rows. */
+    @Column(name = "owner_subject", length = 256)
+    private String ownerSubject;
+
     @Column(nullable = false, length = 32)
     private String regionId;
 
@@ -153,6 +157,14 @@ public class OrderEntity {
      */
     public void setIdempotencyKey(String idempotencyKey) {
         this.idempotencyKey = idempotencyKey;
+    }
+
+    public String getOwnerSubject() {
+        return ownerSubject;
+    }
+
+    public void setOwnerSubject(String ownerSubject) {
+        this.ownerSubject = ownerSubject;
     }
 
     public String getRegionId() {

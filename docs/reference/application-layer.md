@@ -14,21 +14,32 @@ Application services orchestrate use-cases, transactions, and infrastructure por
 
 ### `OrderService` (command/write side)
 
-- Enforces regional write gating via `RegionalFailoverManager`
+- Enforces regional write gating via `RegionalFailoverManager` and backpressure via `BackpressureManager`
 - Implements idempotency lifecycle flow:
   - resolve key state (`IN_PROGRESS`/`COMPLETED`/absent)
   - reserve `IN_PROGRESS`
   - persist order + outbox
   - mark `COMPLETED` after commit
+- **Create:** binds **`owner_subject`** from caller (`Order.create(..., ownerSubject)`); rejects blank owner
 - Uses optimistic locking and retry semantics for status/cancel mutations
-- Invalidates read cache keys after successful writes
+- **Cancel:** `assertCancelAllowed` — admins always; non-admins require `owner_subject == caller`; null-owner legacy rows require admin (`ForbiddenException`)
+- **Scheduled promotion:** `promotePendingOrdersScheduled()` loads all `PENDING`, promotes per short transaction; invoked by `PendingToProcessingScheduler`
+- Invalidates read cache via **`OrderReadCacheKeys`** + legacy `order:id:` eviction (see below)
 
 ### `OrderQueryService` (query/read side)
 
-- Cache-aside read orchestration for by-id and filtered-list calls
-- Coalesces concurrent cache misses by key to avoid thundering herd
-- Emits query timing/error metrics
-- Falls back to repository results when cache is degraded
+- Cache-aside for by-id and status-filtered lists with **stampede coalescing**
+- **Scoped reads:**
+  - **Admin:** `findById`, `findAll` / `findByStatus` (global)
+  - **Non-admin:** `findByIdAndOwnerSubject`, `findByOwnerSubject` / `findByOwnerSubjectAndStatus`
+- Cross-tenant access by id → **`NotFoundException`** (404) for non-admins
+- Cache keys from **`OrderReadCacheKeys`** — never share a by-id key between users
+- Emits query timing/error metrics (`orders.query.*`)
+
+### `OrderReadCacheKeys` (companion utility)
+
+- Centralizes key shapes: `order:admin:id:*`, `order:user:{sub}:id:*`, list keys for admin vs per-owner
+- Used by `OrderQueryService` (read) and invalidation in `OrderService` (write)
 
 ### `OutboxService`
 
@@ -39,15 +50,21 @@ Application services orchestrate use-cases, transactions, and infrastructure por
 
 ## Ports
 
-- `OrderRepository`: order persistence contract over application snapshots (`OrderRecord`, `OrderItemRecord`) rather than infrastructure entities
-- `OutboxRepository`: outbox persistence/claim/archive contract
-- `ProcessedEventRepository`: consumer dedupe marker contract
-- `EventPublisher`: async integration event publication contract
-- `CacheProvider`: cache-aside operations contract
+- **`OrderRepository`:** CRUD and queries including **owner-scoped** methods (`findByIdAndOwnerSubject`, `findByOwnerSubject`, `findByOwnerSubjectAndStatus`)
+- **`OutboxRepository`:** outbox persistence/claim/archive contract
+- **`ProcessedEventRepository`:** consumer dedupe marker contract
+- **`EventPublisher`:** async integration event publication contract
+- **`CacheProvider`:** cache-aside operations contract
 
 ## Key Application Invariants
 
-- Writes are blocked when regional mode is passive
-- Order create does not directly publish Kafka events
+- Writes are blocked when regional mode is passive or backpressure rejects writes
+- Order create does not directly publish Kafka events (outbox only)
 - Idempotency completion is recorded only after successful commit
-- Query reads remain available during cache failures
+- Query reads remain available during cache failures (fail-soft to DB)
+- **Authorization** for reads/cancels is enforced in application services, not only in `SecurityConfig`
+
+## Related documentation
+
+- [Security and Authorization](../security-and-authorization.md) — end-to-end auth matrix and cache rules
+- [API Layer](./api-layer.md) — HTTP mapping

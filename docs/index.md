@@ -5,7 +5,7 @@ nav_order: 1
 
 # Order Processing System Documentation
 
-This documentation describes the current implementation after adaptive retry, dynamic rate limiting, active-active consistency controls, transactional Kafka publishing, and system-wide backpressure propagation.
+This documentation describes the current implementation: transactional outbox, **scheduled** `PENDING`→`PROCESSING` promotion (not performed by the Kafka consumer), **JWT-scoped read and cancel** authorization with cache-isolated keys, adaptive retry, dynamic rate limiting, regional consistency controls, transactional Kafka publishing, and system-wide backpressure propagation.
 
 ## Quick Start
 
@@ -17,12 +17,15 @@ This documentation describes the current implementation after adaptive retry, dy
 ## Implementation Snapshot
 
 - **Architecture:** Hexagonal + CQRS + DDD aggregate/state pattern
-- **Write correctness:** idempotency (`IN_PROGRESS`/`COMPLETED`), optimistic locking, outbox
-- **Async reliability:** partitioned outbox workers, adaptive retry classification, Kafka consumer retries + DLT
-- **Read performance:** cache-aside query service + stampede coalescing + Redis circuit-breaker
+- **Write correctness:** idempotency (`IN_PROGRESS`/`COMPLETED`), optimistic locking, outbox; order **ownership** (`owner_subject` = JWT `sub`) on create
+- **Scheduling:** `PendingToProcessingScheduler` → `OrderService.promotePendingOrdersScheduled()` (configurable interval); sole automatic `PENDING`→`PROCESSING` path
+- **Async reliability:** partitioned outbox workers, adaptive retry classification, Kafka consumer retries + DLT; consumer writes **dedupe markers only** (no status promotion)
+- **Read performance:** cache-aside query service + stampede coalescing + Redis circuit-breaker; **admin vs owner-scoped cache keys** (`OrderReadCacheKeys`)
+- **Read authorization:** non-admins scoped by `owner_subject` on get/list/page; cross-tenant get → `404`
 - **Resilience:** active/passive failover + active-active consistency conflict checks + system-wide backpressure
-- **Security:** JWT resource server + role-based route authorization + normalized API errors
-- **Observability:** Micrometer metrics, structured logs, tracing hooks
+- **Security:** JWT resource server + RBAC + resource-level rules ([Security and Authorization](./security-and-authorization.md))
+- **Observability:** Micrometer metrics (including `api.errors.unexpected`), structured logs, tracing hooks
+- **CI:** GitHub Actions `mvn clean test` on push/PR to mainline branches (see repository `.github/workflows/ci.yml`)
 
 ## Architecture Diagrams
 
@@ -54,6 +57,7 @@ flowchart LR
     end
 
     K --> KC[infrastructure/messaging/consumer/OrderCreatedConsumer]
+    SCH[infrastructure/scheduling/PendingToProcessingScheduler] --> WS
     KC --> PR[(ProcessedEventRepository Port)]
     PR --> PRJPA[infrastructure/persistence/adapter/JpaProcessedEventRepository]
     PRJPA --> PDB[(processed_events)]
@@ -95,6 +99,8 @@ stateDiagram-v2
     DELIVERED --> [*]
     CANCELLED --> [*]
 ```
+
+The domain allows multiple transitions from `PENDING` (including direct `SHIPPED` / `DELIVERED` for admin-driven API updates). The **automatic** path from backlog to fulfillment uses **`PENDING` → `PROCESSING`** via the **scheduler**, not via Kafka consumption.
 
 ### Idempotent Create Lifecycle
 
@@ -190,6 +196,7 @@ flowchart LR
 ### Core Guides
 
 - [Design and Architecture](./design-and-architecture.md)
+- [Security and Authorization](./security-and-authorization.md)
 - [Components and Tooling](./components-and-tooling.md)
 - [Observability and Operations](./observability-and-operations.md)
 - [Testing and Quality](./testing-and-quality.md)

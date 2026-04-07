@@ -1,6 +1,6 @@
 ---
 title: Folder and Class Reference
-nav_order: 7
+nav_order: 8
 ---
 
 # Folder and Class Reference
@@ -10,11 +10,12 @@ nav_order: 7
 - `src/main/java/com/example/orderprocessing/interfaces/http`
 - `src/main/java/com/example/orderprocessing/application`
 - `src/main/java/com/example/orderprocessing/domain/order`
-- `src/main/java/com/example/orderprocessing/infrastructure`
+- `src/main/java/com/example/orderprocessing/infrastructure` (includes `infrastructure/scheduling` for `PendingToProcessingScheduler`)
 - `src/main/java/com/example/orderprocessing/config`
 
 ## Documentation Entry Points
 
+- [Security and Authorization](./security-and-authorization.md) — roles, ownership, read/cancel rules
 - [Reference Index](./reference/index.md)
 - [Interface HTTP Layer](./reference/api-layer.md)
 - [Application Layer](./reference/application-layer.md)
@@ -71,5 +72,6 @@ The package layout is optimized for distributed-system correctness, not just cod
 | `application/service` | request-level idempotency and write gating | Idempotency, Write Gating |
 | `domain/order/state` | legal lifecycle transitions | Optimistic Concurrency |
 | `infrastructure/messaging` | reliable eventual publication | Lease Fencing, Eventual Consistency |
+| `infrastructure/scheduling` | periodic `PENDING`→`PROCESSING` promotion | Fixed-rate job, transactional per order |
 | `infrastructure/web/ratelimit` | admission control under load | Backpressure, fail-open |
 | `infrastructure/resilience` | regional safety under dependency failures | Active/Passive mode, conflict suppression |

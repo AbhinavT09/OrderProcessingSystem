@@ -57,7 +57,7 @@ nav_order: 3
 ### 3.3 Event consumption pattern
 
 - consumer validates payload
-- dedupe check + transition + processed marker in transaction
+- **dedupe check + processed marker** in one transaction (no aggregate lifecycle transition; `PENDING`→`PROCESSING` is the **scheduler**)
 - retries and DLT separation for transient vs terminal failures
 
 ## 4. Tooling and Rationale
@@ -91,7 +91,7 @@ nav_order: 3
 | `RedisCacheProvider` | Redis unavailable | fail-soft cache miss, DB fallback |
 | `RateLimitingFilter` | Redis eval failure | fail-open request path |
 | `KafkaEventPublisher` | broker send errors | async failure surfaced to outbox retry flow |
-| `OrderCreatedConsumer` | duplicate delivery | dedupe marker prevents repeated mutation |
+| `OrderCreatedConsumer` | duplicate delivery | dedupe marker prevents repeated processing; scheduled job owns `PENDING`→`PROCESSING` |
 | `RegionalFailoverManager` | sustained unhealthy deps | switch passive, block writes |
 | `OrderService` | stale version update | conflict response, no lost update |
 

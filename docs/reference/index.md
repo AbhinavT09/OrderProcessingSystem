@@ -8,6 +8,8 @@ has_children: true
 
 This section is the implementation-level map of packages, classes, and responsibilities.
 
+**See also:** [Security and Authorization](../security-and-authorization.md) (cross-cutting auth and ownership — not limited to HTTP layer).
+
 ## Layer References
 
 - [Interface HTTP Layer](./api-layer.md)

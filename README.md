@@ -1,3 +1,7 @@
+**Live documentation:** **[https://abhinavt09.github.io/OrderProcessingSystem/](https://abhinavt09.github.io/OrderProcessingSystem/)**
+
+---
+
 # Order Processing System
 
 Production-ready Spring Boot service for reliable e-commerce order processing with strong write correctness, asynchronous event delivery, and operational resilience.
@@ -14,16 +18,32 @@ Production-ready Spring Boot service for reliable e-commerce order processing wi
 - Regional active/passive write gating with dependency health checks
 - Redis-backed cache and distributed rate limiting with degradation safeguards
 - JWT auth + RBAC + standardized API error contracts
+- **Resource-level authorization:** order ownership stored as JWT `sub`; non-admins are scoped on **read, list, and cancel**; admins bypass scope
 - Micrometer metrics, request correlation, and tracing integration
+
+## Documentation
+
+| Resource | Description |
+|----------|-------------|
+| **GitHub Pages** | Full architecture, operations, reference layers, and failure scenarios — link at top of this file |
+| `docs/` (Jekyll) | Same content as the site; build locally with `bundle exec jekyll serve` from `docs/` if needed |
+| Layer reference | [`docs/reference/`](docs/reference/) — API, application, domain, infrastructure, configuration |
+
+Authoritative deep dives (on the live site and in-repo):
+
+- [Design and Architecture](docs/design-and-architecture.md) — outbox, scheduling vs Kafka, consistency
+- [Security and Authorization](docs/security-and-authorization.md) — roles, ownership, cache key isolation, `404` vs `403`
+- [Observability and Operations](docs/observability-and-operations.md) — metrics, logging, alerts
+- [Testing and Quality](docs/testing-and-quality.md) — suites, CI, residual gaps
 
 ## Core Features
 
 ### Order lifecycle and APIs
 
-- Create orders with optional `X-Idempotency-Key`
-- Fetch by id and list by status
-- Update status with optimistic concurrency version
-- Cancel orders when domain rules allow it
+- Create orders with optional `X-Idempotency-Key` (ownership is bound to the JWT **`sub`** of the caller, exposed as `Authentication.getName()`)
+- **Read scope:** `GET /orders/{id}`, `GET /orders`, `GET /orders/page` — non-**ADMIN** callers only see **their** orders (`owner_subject` match); **ADMIN** sees all. Cross-tenant access by id returns **`404`** (not `403`) to avoid leaking existence.
+- Update status with optimistic concurrency version (**admin-only** route)
+- Cancel while `PENDING`: **USER**/**ADMIN** may call cancel; non-admins only if they own the order; **ADMIN** may cancel any order
 - Lifecycle states: `PENDING`, `PROCESSING`, `SHIPPED`, `DELIVERED`, `CANCELLED`
 
 ### Write-path correctness
@@ -35,7 +55,7 @@ Production-ready Spring Boot service for reliable e-commerce order processing wi
 - Optimistic locking (`@Version`) for concurrent update/cancel safety
 - Regional write gating (`RegionalFailoverManager`) blocks writes when node is passive
 
-### Event-driven processing
+### Event-driven processing and scheduling
 
 - `OrderCreated` events are persisted to outbox and published asynchronously
 - Outbox pipeline:
@@ -43,23 +63,24 @@ Production-ready Spring Boot service for reliable e-commerce order processing wi
   - `OutboxFetcher` (partition claim)
   - `OutboxProcessor` (async publish flow)
   - `OutboxRetryHandler` (retry/backoff policy)
-- Kafka consumer (`OrderCreatedConsumer`) supports:
-  - delayed processing window
-  - processed-event dedupe
-  - retry-topic behavior
-  - DLT handling with diagnostic logging
+- **Automatic `PENDING` → `PROCESSING`:** Spring `@Scheduled` in `PendingToProcessingScheduler` on a fixed interval (default **every five minutes**, `app.scheduling.pending-to-processing-ms`). **This is the only automatic promotion path.**
+- Kafka consumer (`OrderCreatedConsumer`):
+  - acknowledges `ORDER_CREATED` and writes **processed-event** dedupe markers (at-least-once, idempotent application)
+  - does **not** change order status to `PROCESSING`
+  - uses retry-topic semantics for transient failures and DLT handling for terminal failures
 
 ### Cache, rate limiting, and resilience
 
 - Redis cache-aside with TTLs, jitter, and fail-soft behavior
+- **Read cache keys are scoped** (`OrderReadCacheKeys`): admin global keys vs per-owner keys so the cache cannot serve one user another user’s order
 - Redis token-bucket rate limiting via Lua script (distributed and atomic)
 - Redis/Kafka/DB dependency health monitoring for multi-region failover mode
 - Circuit-breaker style protections in Redis cache and Kafka producer paths
 
 ### Security and observability
 
-- OAuth2/JWT resource server with role-based endpoint authorization
-- Global exception mapping to consistent `ApiError` responses
+- OAuth2/JWT resource server with role-based endpoint authorization (`ROLE_USER`, `ROLE_ADMIN` from JWT `roles` claim via `RoleClaimJwtAuthenticationConverter`)
+- Global exception mapping to consistent `ApiError` responses (`403` **FORBIDDEN**, `404` **NOT_FOUND**, `409` **CONFLICT**, `503` **INFRASTRUCTURE_ERROR**; uncaught → `500` with **`api.errors.unexpected`** counter and error logging)
 - Request/region context propagation (`X-Request-Id`, region tags)
 - Prometheus metrics and OpenTelemetry tracing support
 
@@ -74,10 +95,6 @@ Client -> Interface HTTP -> Application Services -> Domain Aggregate/State
                                  v
                     Infrastructure (JPA, Redis, Kafka, Resilience)
 ```
-
-## GitHub Pages Documentation
-
-- Live docs URL: [https://abhinavt09.github.io/OrderProcessingSystem/](https://abhinavt09.github.io/OrderProcessingSystem/)
 
 ## Technology Stack
 
@@ -100,16 +117,20 @@ src/main/java/com/example/orderprocessing
   domain/order             # aggregate, statuses, state implementations
   infrastructure           # persistence, messaging, cache, web, security, resilience
   config                   # runtime/security/redis configuration
-docs                       # detailed architecture and operational documentation
+docs                       # Jekyll site + detailed architecture and operational documentation
+.github/workflows        # CI (test), Pages (doc deploy)
 ```
 
-## API Endpoints
+## API Endpoints (summary)
 
-- `POST /orders`
-- `GET /orders/{id}`
-- `GET /orders?status=<STATUS>`
-- `PATCH /orders/{id}/status`
-- `PATCH /orders/{id}/cancel`
+| Method | Path | Roles | Notes |
+|--------|------|-------|--------|
+| `POST` | `/orders` | USER, ADMIN | Optional `X-Idempotency-Key`; stores `sub` as owner |
+| `GET` | `/orders/{id}` | USER, ADMIN | Scoped by owner unless ADMIN |
+| `GET` | `/orders` | USER, ADMIN | List bounded; scoped by owner unless ADMIN |
+| `GET` | `/orders/page` | USER, ADMIN | Paginated; same scoping as list |
+| `PATCH` | `/orders/{id}/status` | ADMIN | Optimistic concurrency (`version`) |
+| `PATCH` | `/orders/{id}/cancel` | USER, ADMIN | Domain: `PENDING` only; auth: owner or ADMIN |
 
 ## Getting Started
 
@@ -117,7 +138,7 @@ docs                       # detailed architecture and operational documentation
 
 - Java 17+
 - Maven 3.9+
-- Kafka broker
+- Kafka broker (for full integration; tests can disable listeners)
 - Redis instance (or sentinel/cluster as configured)
 
 ### Build and run
@@ -128,6 +149,15 @@ mvn test
 mvn spring-boot:run
 ```
 
+### Continuous integration
+
+Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs **`mvn -B clean test`** on:
+
+- **push** to `main`, `master`, or `docs`
+- **pull_request** targeting `main` or `master`
+
+Uses JDK 17 (Temurin) with Maven dependency cache.
+
 ### Health and metrics
 
 - Health: `/actuator/health`
@@ -135,13 +165,14 @@ mvn spring-boot:run
 
 ## Configuration Notes
 
-Key runtime areas (see full reference in docs):
+Key runtime areas (see [Configuration and Runtime](docs/reference/configuration-and-runtime.md)):
 
-- outbox polling, partitioning, retry, and retention
-- Kafka topic/consumer group/retry delay/circuit-breaker settings
-- cache TTL and Redis resilience controls
-- multi-region failover thresholds and idempotency TTL settings
+- Outbox polling, partitioning, retry, and retention
+- Scheduler cadence for `PENDING` → `PROCESSING` (`app.scheduling.pending-to-processing-ms`)
+- Kafka topic, consumer group, consumer retry (`app.kafka.consumer-retry-*`), publisher circuit-breaker
+- Cache TTL, **scoped read keys**, and Redis resilience controls
+- Multi-region failover thresholds and idempotency TTL settings
 
 ## Testing and Quality
 
-Current coverage includes domain transitions, idempotency lifecycle scenarios, outbox messaging components, cache/rate-limit behavior, failover controls, and API integration paths.
+Coverage includes: domain transitions, idempotency lifecycle, outbox/messaging components, cache/rate-limit behavior, failover controls, API integration (**ownership on GET/list/cancel**, admin overrides), and CI on every mainline push/PR. See [Testing and Quality](docs/testing-and-quality.md) for gaps and expansion ideas.

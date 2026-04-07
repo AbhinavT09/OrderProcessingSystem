@@ -47,7 +47,7 @@ Coverage focus:
 - atomic outbox lease transitions (`IN_FLIGHT`) at claim time
 - lease-fenced finalization (`markSentIfLeased`/`markFailedIfLeased`) to prevent stale worker overwrite
 - retry transitions, adaptive classification, and scheduling metadata
-- consumer dedupe and delayed processing behavior
+- consumer dedupe (without automatic status promotion; scheduler owns `PENDING` → `PROCESSING`)
 - transactional Kafka publish path and circuit-open behavior
 
 ### Infrastructure/resilience
@@ -65,9 +65,17 @@ Coverage focus:
 ### API integration
 
 - `OrderControllerIntegrationTest`
-  - create/read/status/cancel route behavior
+  - JWT-authenticated create/read; mock JWT uses **explicit `ROLE_*` authorities** (test `jwt()` does not apply `RoleClaimJwtAuthenticationConverter` to claims)
   - idempotency behavior at HTTP boundary
   - validation and error contract behavior
+  - **Read scope:** `404` when fetching another user’s order by id; admin can read any order; list contains only caller’s orders for non-admin
+  - **Cancel scope:** own order, reject other user (`403`), admin can cancel another user’s order
+
+## 2.1 Continuous integration
+
+- **Workflow:** `.github/workflows/ci.yml`
+- **Trigger:** push to `main` / `master` / `docs`; pull requests to `main` / `master`
+- **Command:** `mvn -B clean test` on `ubuntu-latest`, JDK 17 (Temurin), Maven cache enabled
 
 ## 3. Critical Test Flows
 
@@ -81,7 +89,7 @@ flowchart TD
     B --> B2[Circuit opens after repeated transaction failures]
     C[RateLimitingFilterTest] --> C1[Token bucket allow path]
     C --> C2[429 block path]
-    D[OrderCreatedConsumerUnitTest] --> D1[Dedupe marker + state promotion]
+    D[OrderCreatedConsumerUnitTest] --> D1[Dedupe marker without status promotion]
 ```
 
 ## 4. Test Design Standards
@@ -93,12 +101,13 @@ flowchart TD
 
 ## 5. Residual Gaps / Next Expansion
 
-- embedded Kafka end-to-end verification (outbox -> producer -> consumer)
+- embedded Kafka end-to-end verification (outbox → producer → consumer → dedupe marker)
 - crash-injection integration around outbox lease expiry/reclaim path
 - deterministic active-recovery-to-active integration with controlled dependency health
 - conflict resolution strategy permutations under concurrent active-active writes
 - backpressure-level transitions driving write admission and dynamic throttling
-- paginated API contract tests for `GET /orders/page` with size cap and status filter behavior
+- dedicated **`GET /orders/page`** contract tests for total count semantics under **owner scoping** (if product requires strict guarantees)
+- ArchUnit / architecture tests for layer boundaries (optional)
 
 ## 7. Principal Reliability Test Matrix
 
@@ -116,7 +125,7 @@ flowchart TD
 
 ## 6. Quality Gates
 
-- `mvn clean compile` must pass
+- `mvn clean compile` must pass; **`mvn clean test`** is enforced on CI for mainline branches
 - targeted reliability suites should pass before broad runs
-- API and idempotency regression tests are mandatory for write-path changes
+- API, idempotency, and **authorization (read/cancel)** regression tests are mandatory for changes touching `OrderService`, `OrderQueryService`, or security
 

@@ -61,6 +61,21 @@ Reason: transactional Kafka producer introduces additional transaction manager b
 - DB service methods explicitly use `transactionManager`
 - avoids accidental routing of JPA operations through non-JPA transaction managers
 
+### 2.6 Scheduled promotion vs Kafka consumer
+
+Reason: separate **integration** (event log + dedupe) from **business scheduling** (when pending work becomes processing).
+
+- **`PendingToProcessingScheduler`:** `@Scheduled` fixed rate; calls `OrderService.promotePendingOrdersScheduled()`; scans `PENDING` rows and promotes per transaction with the same regional checks as writes.
+- **`OrderCreatedConsumer`:** validates payload, applies regional gate for **acknowledgment path**, writes `processed_events`; does **not** change lifecycle to `PROCESSING`.
+
+### 2.7 Resource-level authorization (reads and cancel)
+
+Reason: role checks on URLs are insufficient; data must be scoped by **owner**.
+
+- **Create** binds JWT `sub` to `owner_subject`.
+- **Query** uses owner-scoped repository methods and cache keys for non-admins; admins use global queries and admin cache keys.
+- **Cancel** enforces owner match or `ROLE_ADMIN` (see [Security and Authorization](./security-and-authorization.md)).
+
 ## 3. Consistency Model
 
 ### Strong consistency paths
@@ -72,9 +87,9 @@ Reason: transactional Kafka producer introduces additional transaction manager b
 
 ### Eventual consistency paths
 
-- post-create progression to `PROCESSING` via Kafka consumer
-- outbox retries/backoff for asynchronous publication
-- retry topics and DLT for consumer-side failure isolation
+- **Automatic `PENDING` → `PROCESSING`:** `PendingToProcessingScheduler` runs on `app.scheduling.pending-to-processing-ms` (not the Kafka consumer; the consumer only records `ORDER_CREATED` in `processed_events`).
+- Outbox retries/backoff for asynchronous **publication** of `ORDER_CREATED` to Kafka
+- Kafka consumer retry topics and DLT for **consume-side** failure isolation (dedupe markers; no aggregate promotion in the consumer)
 
 ### Delivery contract (explicit)
 
@@ -104,10 +119,9 @@ Reason: transactional Kafka producer introduces additional transaction manager b
 
 ### 4.3 Bounded read flow
 
-- existing `GET /orders` remains backward-compatible
-- `GET /orders/page` provides bounded page reads (`page`, `size`) with status filter support
-- server caps page size to prevent unbounded memory pressure on high-cardinality datasets
-- legacy `GET /orders` now executes through a bounded repository page (`app.query.list-max-rows`) to prevent unbounded heap growth
+- `GET /orders` executes through a bounded repository page (`app.query.list-max-rows`) to prevent unbounded heap growth
+- `GET /orders/page` provides bounded page reads (`page`, `size`) with status filter support; server caps page size
+- **Authorization:** non-admin callers receive only rows where `owner_subject` matches their JWT `sub`; admins see all (see [Security and Authorization](./security-and-authorization.md))
 
 ## 4.4 Order Creation Idempotency Flow (Detailed)
 
@@ -294,8 +308,7 @@ flowchart TD
 `OrderCreatedConsumer` provides:
 
 - schema validation/deserialization
-- delayed processing enforcement window
-- transactional dedupe marker + state transition
+- transactional dedupe marker write (automatic `PENDING` → `PROCESSING` is a separate scheduled job, not the consumer)
 - retry topic routing for transient conditions
 - DLT handling with structured diagnostics
 

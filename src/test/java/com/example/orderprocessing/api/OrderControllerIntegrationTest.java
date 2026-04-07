@@ -4,16 +4,16 @@ import com.example.orderprocessing.application.port.EventPublisher;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -41,6 +41,22 @@ class OrderControllerIntegrationTest {
     @MockBean
     private EventPublisher eventPublisher;
 
+    /**
+     * Test JWT with {@code sub} for ownership checks and explicit roles (mock post-processor does not
+     * run claims through {@link com.example.orderprocessing.infrastructure.security.RoleClaimJwtAuthenticationConverter}).
+     */
+    private static RequestPostProcessor jwtUser(String subject) {
+        return SecurityMockMvcRequestPostProcessors.jwt()
+                .jwt(j -> j.subject(subject))
+                .authorities(new SimpleGrantedAuthority("ROLE_USER"));
+    }
+
+    private static RequestPostProcessor jwtAdmin(String subject) {
+        return SecurityMockMvcRequestPostProcessors.jwt()
+                .jwt(j -> j.subject(subject))
+                .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"));
+    }
+
     @Test
     void shouldRequireAuthentication() throws Exception {
         mockMvc.perform(get("/orders"))
@@ -58,8 +74,7 @@ class OrderControllerIntegrationTest {
                 """;
 
         MvcResult createResult = mockMvc.perform(post("/orders")
-                        .with(SecurityMockMvcRequestPostProcessors.jwt()
-                                .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                        .with(jwtUser("customer-1"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("X-Idempotency-Key", "idem-create-order-1")
                         .content(body))
@@ -71,8 +86,7 @@ class OrderControllerIntegrationTest {
         String id = created.get("id").asText();
 
         mockMvc.perform(get("/orders/{id}", id)
-                        .with(SecurityMockMvcRequestPostProcessors.jwt()
-                                .authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                        .with(jwtUser("customer-1")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id));
     }
@@ -87,8 +101,7 @@ class OrderControllerIntegrationTest {
                 }
                 """;
         MvcResult createResult = mockMvc.perform(post("/orders")
-                        .with(SecurityMockMvcRequestPostProcessors.jwt()
-                                .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                        .with(jwtUser("customer-2"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("X-Idempotency-Key", "idem-create-order-2")
                         .content(body))
@@ -106,8 +119,7 @@ class OrderControllerIntegrationTest {
                 """;
 
         mockMvc.perform(patch("/orders/{id}/status", id)
-                        .with(SecurityMockMvcRequestPostProcessors.jwt()
-                                .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                        .with(jwtUser("customer-2"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(patchBody))
                 .andExpect(status().isForbidden());
@@ -116,8 +128,7 @@ class OrderControllerIntegrationTest {
     @Test
     void shouldValidateHeaderAndPayload() throws Exception {
         mockMvc.perform(post("/orders")
-                        .with(SecurityMockMvcRequestPostProcessors.jwt()
-                                .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                        .with(jwtUser("customer-val"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("X-Idempotency-Key", "x".repeat(129))
                         .content("{\"items\":[]}"))
@@ -136,8 +147,7 @@ class OrderControllerIntegrationTest {
                 """;
 
         MvcResult first = mockMvc.perform(post("/orders")
-                        .with(SecurityMockMvcRequestPostProcessors.jwt()
-                                .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                        .with(jwtUser("customer-idem"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("X-Idempotency-Key", "idem-integration-1")
                         .content(body))
@@ -145,8 +155,7 @@ class OrderControllerIntegrationTest {
                 .andReturn();
 
         MvcResult second = mockMvc.perform(post("/orders")
-                        .with(SecurityMockMvcRequestPostProcessors.jwt()
-                                .authorities(new SimpleGrantedAuthority("ROLE_USER")))
+                        .with(jwtUser("customer-idem"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("X-Idempotency-Key", "idem-integration-1")
                         .content(body))
@@ -156,5 +165,141 @@ class OrderControllerIntegrationTest {
         String firstId = objectMapper.readTree(first.getResponse().getContentAsString()).get("id").asText();
         String secondId = objectMapper.readTree(second.getResponse().getContentAsString()).get("id").asText();
         org.junit.jupiter.api.Assertions.assertEquals(firstId, secondId);
+    }
+
+    @Test
+    void shouldCancelOwnPendingOrder() throws Exception {
+        String body = """
+                {
+                  "items": [ { "productName": "Mug", "quantity": 1, "price": 5.0 } ]
+                }
+                """;
+        MvcResult createResult = mockMvc.perform(post("/orders")
+                        .with(jwtUser("owner-a"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-cancel-own")
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andReturn();
+
+        String id = objectMapper.readTree(createResult.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(patch("/orders/{id}/cancel", id)
+                        .with(jwtUser("owner-a")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    @Test
+    void shouldRejectCancelWhenDifferentUser() throws Exception {
+        String body = """
+                {
+                  "items": [ { "productName": "Pen", "quantity": 1, "price": 2.0 } ]
+                }
+                """;
+        MvcResult createResult = mockMvc.perform(post("/orders")
+                        .with(jwtUser("owner-b"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-cancel-other")
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String id = objectMapper.readTree(createResult.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(patch("/orders/{id}/cancel", id)
+                        .with(jwtUser("intruder")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void shouldAllowAdminToCancelAnotherUsersOrder() throws Exception {
+        String body = """
+                {
+                  "items": [ { "productName": "Notebook", "quantity": 1, "price": 8.0 } ]
+                }
+                """;
+        MvcResult createResult = mockMvc.perform(post("/orders")
+                        .with(jwtUser("owner-c"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-cancel-admin")
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String id = objectMapper.readTree(createResult.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(patch("/orders/{id}/cancel", id)
+                        .with(jwtAdmin("ops-admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenFetchingAnotherUsersOrder() throws Exception {
+        String body = """
+                { "items": [ { "productName": "Book", "quantity": 1, "price": 12.0 } ] }
+                """;
+        MvcResult create = mockMvc.perform(post("/orders")
+                        .with(jwtUser("read-owner-a"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-read-cross")
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String id = objectMapper.readTree(create.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(get("/orders/{id}", id).with(jwtUser("read-owner-b")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void shouldAllowAdminToFetchAnyOrderById() throws Exception {
+        String body = """
+                { "items": [ { "productName": "AdminRead", "quantity": 1, "price": 3.0 } ] }
+                """;
+        MvcResult create = mockMvc.perform(post("/orders")
+                        .with(jwtUser("customer-for-admin-read"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-admin-read-by-id")
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String id = objectMapper.readTree(create.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(get("/orders/{id}", id).with(jwtAdmin("super-reader")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id));
+    }
+
+    @Test
+    void shouldListOnlyOwnOrdersForNonAdmin() throws Exception {
+        String bodyA = """
+                { "items": [ { "productName": "OnlyMineA", "quantity": 1, "price": 1.0 } ] }
+                """;
+        mockMvc.perform(post("/orders")
+                        .with(jwtUser("list-scope-a"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-list-scope-a")
+                        .content(bodyA))
+                .andExpect(status().isCreated());
+
+        String bodyB = """
+                { "items": [ { "productName": "OtherUserB", "quantity": 1, "price": 2.0 } ] }
+                """;
+        mockMvc.perform(post("/orders")
+                        .with(jwtUser("list-scope-b"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-list-scope-b")
+                        .content(bodyB))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/orders").with(jwtUser("list-scope-a")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].items[0].productName").value("OnlyMineA"));
     }
 }

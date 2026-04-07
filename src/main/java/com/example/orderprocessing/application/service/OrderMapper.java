@@ -43,6 +43,7 @@ public class OrderMapper {
                 record.id(),
                 record.createdAt(),
                 record.idempotencyKey(),
+                record.ownerSubject(),
                 items,
                 record.status(),
                 record.version());
@@ -61,6 +62,7 @@ public class OrderMapper {
                 domain.getStatus(),
                 domain.getCreatedAt(),
                 domain.getIdempotencyKey(),
+                domain.getOwnerSubject(),
                 regionId,
                 lastUpdatedTimestamp,
                 toItemRecords(domain.getItems()));

@@ -69,4 +69,16 @@ public interface OrderRepository {
      * @return matching order when key has a stored mapping
      */
     Optional<OrderRecord> findByIdempotencyKey(String idempotencyKey);
+    /**
+     * Loads an order when it belongs to the given owner principal (JWT {@code sub}).
+     */
+    Optional<OrderRecord> findByIdAndOwnerSubject(UUID id, String ownerSubject);
+    /**
+     * Page of orders for a single owner.
+     */
+    Page<OrderRecord> findByOwnerSubject(String ownerSubject, Pageable pageable);
+    /**
+     * Page of orders for a single owner filtered by status.
+     */
+    Page<OrderRecord> findByOwnerSubjectAndStatus(String ownerSubject, OrderStatus status, Pageable pageable);
 }

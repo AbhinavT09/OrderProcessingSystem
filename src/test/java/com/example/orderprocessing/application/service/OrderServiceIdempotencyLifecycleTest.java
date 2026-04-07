@@ -13,6 +13,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -26,6 +27,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -45,8 +51,8 @@ class OrderServiceIdempotencyLifecycleTest {
         CreateOrderRequest request = request("Keyboard");
         String key = "idem-same-key";
 
-        UUID first = service.createOrder(request, key).id();
-        UUID second = service.createOrder(request, key).id();
+        UUID first = service.createOrder(request, key, "test-owner").id();
+        UUID second = service.createOrder(request, key, "test-owner").id();
 
         assertEquals(first, second);
         assertEquals(1, repository.size());
@@ -62,7 +68,7 @@ class OrderServiceIdempotencyLifecycleTest {
         idempotency.forceInProgress(key);
 
         try {
-            service.createOrder(request("Mouse"), key);
+            service.createOrder(request("Mouse"), key, "test-owner");
             fail("Expected conflict while key is IN_PROGRESS");
         } catch (Exception ex) {
             assertTrue(ex.getMessage().contains("Duplicate request in progress"));
@@ -71,7 +77,7 @@ class OrderServiceIdempotencyLifecycleTest {
         // Simulate expiry/recovery after crash.
         idempotency.clear(key);
 
-        UUID created = service.createOrder(request("Mouse"), key).id();
+        UUID created = service.createOrder(request("Mouse"), key, "test-owner").id();
         assertNotNull(created);
         assertEquals(1, repository.size());
     }
@@ -83,9 +89,9 @@ class OrderServiceIdempotencyLifecycleTest {
         OrderService service = buildService(repository, idempotency);
 
         String key = "idem-completed-reuse";
-        UUID first = service.createOrder(request("Adapter"), key).id();
-        UUID second = service.createOrder(request("Adapter"), key).id();
-        UUID third = service.createOrder(request("Adapter"), key).id();
+        UUID first = service.createOrder(request("Adapter"), key, "test-owner").id();
+        UUID second = service.createOrder(request("Adapter"), key, "test-owner").id();
+        UUID third = service.createOrder(request("Adapter"), key, "test-owner").id();
 
         assertEquals(first, second);
         assertEquals(first, third);
@@ -108,7 +114,7 @@ class OrderServiceIdempotencyLifecycleTest {
             ready.countDown();
             try {
                 go.await(2, TimeUnit.SECONDS);
-                UUID id = service.createOrder(request("Cable"), key).id();
+                UUID id = service.createOrder(request("Cable"), key, "test-owner").id();
                 successes.add(id);
             } catch (Exception ex) {
                 failures.add(ex.getMessage());
@@ -148,7 +154,25 @@ class OrderServiceIdempotencyLifecycleTest {
                 idempotency,
                 regionalConsistencyManager,
                 backpressureManager,
+                new TransactionTemplate(new NoopTransactionManager()),
                 new SimpleMeterRegistry());
+    }
+
+    private static final class NoopTransactionManager implements PlatformTransactionManager {
+        @Override
+        public TransactionStatus getTransaction(TransactionDefinition definition) {
+            return new SimpleTransactionStatus();
+        }
+
+        @Override
+        public void commit(TransactionStatus status) {
+            // no-op
+        }
+
+        @Override
+        public void rollback(TransactionStatus status) {
+            // no-op
+        }
     }
 
     private CreateOrderRequest request(String productName) {
@@ -188,6 +212,7 @@ class OrderServiceIdempotencyLifecycleTest {
                         order.status() == null ? OrderStatus.PENDING : order.status(),
                         order.createdAt() == null ? Instant.now() : order.createdAt(),
                         order.idempotencyKey(),
+                        order.ownerSubject(),
                         order.regionId(),
                         order.lastUpdatedTimestamp(),
                         order.items());
@@ -239,6 +264,33 @@ class OrderServiceIdempotencyLifecycleTest {
         public Optional<OrderRecord> findByIdempotencyKey(String idempotencyKey) {
             UUID id = byIdempotencyKey.get(idempotencyKey);
             return id == null ? Optional.empty() : findById(id);
+        }
+
+        @Override
+        public Optional<OrderRecord> findByIdAndOwnerSubject(UUID id, String ownerSubject) {
+            return findById(id).filter(o -> ownerSubject != null && ownerSubject.equals(o.ownerSubject()));
+        }
+
+        @Override
+        public Page<OrderRecord> findByOwnerSubject(String ownerSubject, Pageable pageable) {
+            List<OrderRecord> filtered = byId.values().stream()
+                    .filter(o -> ownerSubject != null && ownerSubject.equals(o.ownerSubject()))
+                    .sorted(Comparator.comparing(OrderRecord::createdAt))
+                    .toList();
+            int start = (int) Math.min((long) pageable.getPageNumber() * pageable.getPageSize(), filtered.size());
+            int end = Math.min(start + pageable.getPageSize(), filtered.size());
+            return new PageImpl<>(filtered.subList(start, end), pageable, filtered.size());
+        }
+
+        @Override
+        public Page<OrderRecord> findByOwnerSubjectAndStatus(String ownerSubject, OrderStatus status, Pageable pageable) {
+            List<OrderRecord> filtered = byId.values().stream()
+                    .filter(o -> ownerSubject != null && ownerSubject.equals(o.ownerSubject()) && status == o.status())
+                    .sorted(Comparator.comparing(OrderRecord::createdAt))
+                    .toList();
+            int start = (int) Math.min((long) pageable.getPageNumber() * pageable.getPageSize(), filtered.size());
+            int end = Math.min(start + pageable.getPageSize(), filtered.size());
+            return new PageImpl<>(filtered.subList(start, end), pageable, filtered.size());
         }
 
         int size() {

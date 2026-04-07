@@ -18,6 +18,7 @@ public class Order {
     private final UUID id;
     private final Instant createdAt;
     private final String idempotencyKey;
+    private final String ownerSubject;
     private final List<OrderItem> items;
     private final Long version;
     private OrderState currentState;
@@ -25,12 +26,14 @@ public class Order {
     private Order(UUID id,
                   Instant createdAt,
                   String idempotencyKey,
+                  String ownerSubject,
                   List<OrderItem> items,
                   OrderState currentState,
                   Long version) {
         this.id = id;
         this.createdAt = createdAt;
         this.idempotencyKey = idempotencyKey;
+        this.ownerSubject = ownerSubject;
         this.items = items;
         this.currentState = currentState;
         this.version = version;
@@ -41,10 +44,11 @@ public class Order {
      *
      * @param items order line items
      * @param idempotencyKey optional request key captured for duplicate suppression
+     * @param ownerSubject identity of the principal placing the order (e.g. JWT {@code sub})
      * @return newly constructed order aggregate
      */
-    public static Order create(List<OrderItem> items, String idempotencyKey) {
-        return new Order(UUID.randomUUID(), Instant.now(), idempotencyKey, items, new PendingState(), null);
+    public static Order create(List<OrderItem> items, String idempotencyKey, String ownerSubject) {
+        return new Order(UUID.randomUUID(), Instant.now(), idempotencyKey, ownerSubject, items, new PendingState(), null);
     }
 
     /**
@@ -53,6 +57,7 @@ public class Order {
      * @param status persisted order status
      * @param createdAt persisted creation timestamp
      * @param idempotencyKey persisted idempotency key
+     * @param ownerSubject principal who owns the order; may be null for legacy snapshots
      * @param items persisted order items
      * @param version persisted optimistic lock version
      * @return reconstructed order aggregate
@@ -60,10 +65,11 @@ public class Order {
     public static Order rehydrate(UUID id,
                                   Instant createdAt,
                                   String idempotencyKey,
+                                  String ownerSubject,
                                   List<OrderItem> items,
                                   OrderStatus status,
                                   Long version) {
-        return new Order(id, createdAt, idempotencyKey, items, OrderStateFactory.fromStatus(status), version);
+        return new Order(id, createdAt, idempotencyKey, ownerSubject, items, OrderStateFactory.fromStatus(status), version);
     }
 
     /**
@@ -106,6 +112,11 @@ public class Order {
     /** Returns optional idempotency key associated with create request. */
     public String getIdempotencyKey() {
         return idempotencyKey;
+    }
+
+    /** Returns the authenticated principal identifier (e.g. JWT {@code sub}) stored at order creation. */
+    public String getOwnerSubject() {
+        return ownerSubject;
     }
 
     /** Returns immutable order item collection. */

@@ -1,18 +1,15 @@
-package com.example.orderprocessing.infrastructure.messaging;
+package com.example.orderprocessing.application.service;
 
+import com.example.orderprocessing.application.port.CacheProvider;
 import com.example.orderprocessing.application.port.OrderItemRecord;
 import com.example.orderprocessing.application.port.OrderRecord;
 import com.example.orderprocessing.application.port.OrderRepository;
-import com.example.orderprocessing.application.port.ProcessedEventRepository;
-import com.example.orderprocessing.application.service.OrderMapper;
 import com.example.orderprocessing.domain.order.OrderStatus;
-import com.example.orderprocessing.infrastructure.messaging.consumer.OrderCreatedConsumer;
-import com.example.orderprocessing.infrastructure.persistence.entity.ProcessedEventEntity;
+import com.example.orderprocessing.infrastructure.crosscutting.GlobalIdempotencyService;
 import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
 import com.example.orderprocessing.infrastructure.resilience.RegionalConsistencyManager;
-import com.example.orderprocessing.infrastructure.messaging.schema.VersionedJsonOrderCreatedEventSchemaRegistry;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -26,7 +23,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
-import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
@@ -38,45 +34,45 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-class OrderCreatedConsumerUnitTest {
+class OrderServiceScheduledPromotionTest {
 
     @Test
-    void shouldAcknowledgeOrderCreatedWithoutPromotingStatusAndPersistProcessedMarker() throws Exception {
-        UUID orderId = UUID.randomUUID();
-        InMemoryOrderRepository orderRepository = new InMemoryOrderRepository();
-        orderRepository.save(buildOrder(orderId, OrderStatus.PENDING));
+    void promotePendingOrdersScheduled_movesAllPendingToProcessing() {
+        UUID id1 = UUID.randomUUID();
+        UUID id2 = UUID.randomUUID();
+        InMemoryOrderRepository repository = new InMemoryOrderRepository();
+        repository.save(buildOrder(id1, OrderStatus.PENDING));
+        repository.save(buildOrder(id2, OrderStatus.PENDING));
 
-        InMemoryProcessedEventRepository processedRepository = new InMemoryProcessedEventRepository();
-        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-        BackpressureManager backpressureManager = mock(BackpressureManager.class);
+        OrderService service = buildService(repository);
+
+        service.promotePendingOrdersScheduled();
+
+        assertEquals(OrderStatus.PROCESSING, repository.findById(id1).orElseThrow().status());
+        assertEquals(OrderStatus.PROCESSING, repository.findById(id2).orElseThrow().status());
+    }
+
+    private static OrderService buildService(InMemoryOrderRepository repository) {
+        CacheProvider cacheProvider = new NoOpCacheProvider();
+        OutboxService outbox = mock(OutboxService.class);
+        OrderMapper mapper = new OrderMapper();
         RegionalConsistencyManager regionalConsistencyManager = mock(RegionalConsistencyManager.class);
+        BackpressureManager backpressureManager = mock(BackpressureManager.class);
+        GlobalIdempotencyService idempotency = mock(GlobalIdempotencyService.class);
+        when(regionalConsistencyManager.allowsWrites()).thenReturn(true);
+        when(regionalConsistencyManager.regionId()).thenReturn("region-a");
         when(regionalConsistencyManager.shouldApplyIncomingUpdate(any(), any(), any(), any())).thenReturn(true);
-        OrderCreatedConsumer consumer = new OrderCreatedConsumer(
-                new VersionedJsonOrderCreatedEventSchemaRegistry(
-                        new ObjectMapper(),
-                        meterRegistry),
-                orderRepository,
-                processedRepository,
-                new OrderMapper(),
-                meterRegistry,
-                new TransactionTemplate(new NoopTransactionManager()),
+        when(backpressureManager.shouldRejectWrites()).thenReturn(false);
+        return new OrderService(
+                repository,
+                cacheProvider,
+                outbox,
+                mapper,
+                idempotency,
+                regionalConsistencyManager,
                 backpressureManager,
-                regionalConsistencyManager);
-
-        String payload = """
-                {
-                  "eventId": "evt-promote",
-                  "eventType": "ORDER_CREATED",
-                  "orderId": "%s",
-                  "occurredAt": "%s"
-                }
-                """.formatted(orderId, Instant.now().minus(6, ChronoUnit.MINUTES));
-
-        Acknowledgment ack = () -> { };
-        consumer.consume(payload, ack);
-
-        assertEquals(OrderStatus.PENDING, orderRepository.findById(orderId).orElseThrow().status());
-        assertEquals(1, processedRepository.savedCount());
+                new TransactionTemplate(new NoopTransactionManager()),
+                new SimpleMeterRegistry());
     }
 
     private static OrderRecord buildOrder(UUID id, OrderStatus status) {
@@ -92,13 +88,43 @@ class OrderCreatedConsumerUnitTest {
                 List.of(new OrderItemRecord("Item", 1, 10.0)));
     }
 
+    private static final class NoOpCacheProvider implements CacheProvider {
+        @Override
+        public <T> Optional<T> get(String key, Class<T> type) {
+            return Optional.empty();
+        }
+
+        @Override
+        public void put(String key, Object value) {
+        }
+
+        @Override
+        public void put(String key, Object value, Duration ttl) {
+        }
+
+        @Override
+        public void evict(String key) {
+        }
+    }
+
     private static final class InMemoryOrderRepository implements OrderRepository {
         private final Map<UUID, OrderRecord> store = new HashMap<>();
 
         @Override
         public OrderRecord save(OrderRecord order) {
-            store.put(order.id(), order);
-            return order;
+            long nextVersion = order.version() == null ? 0L : order.version() + 1;
+            OrderRecord withVersion = new OrderRecord(
+                    order.id(),
+                    nextVersion,
+                    order.status(),
+                    order.createdAt(),
+                    order.idempotencyKey(),
+                    order.ownerSubject(),
+                    order.regionId(),
+                    order.lastUpdatedTimestamp(),
+                    order.items());
+            store.put(order.id(), withVersion);
+            return withVersion;
         }
 
         @Override
@@ -162,28 +188,6 @@ class OrderCreatedConsumerUnitTest {
             int start = (int) Math.min((long) pageable.getPageNumber() * pageable.getPageSize(), filtered.size());
             int end = Math.min(start + pageable.getPageSize(), filtered.size());
             return new PageImpl<>(filtered.subList(start, end), pageable, filtered.size());
-        }
-    }
-
-    private static final class InMemoryProcessedEventRepository implements ProcessedEventRepository {
-        private final List<ProcessedEventEntity> processed = new ArrayList<>();
-
-        @Override
-        public boolean existsByEventId(String eventId) {
-            return processed.stream().anyMatch(e -> eventId.equals(e.getEventId()));
-        }
-
-        @Override
-        public void save(String eventId, String eventType, Instant processedAt) {
-            ProcessedEventEntity event = new ProcessedEventEntity();
-            event.setEventId(eventId);
-            event.setEventType(eventType);
-            event.setProcessedAt(processedAt);
-            processed.add(event);
-        }
-
-        int savedCount() {
-            return processed.size();
         }
     }
 

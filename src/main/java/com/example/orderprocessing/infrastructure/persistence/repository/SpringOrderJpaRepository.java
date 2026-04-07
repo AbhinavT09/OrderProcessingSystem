@@ -38,4 +38,10 @@ public interface SpringOrderJpaRepository extends JpaRepository<OrderEntity, UUI
      * @return matching order when present
      */
     Optional<OrderEntity> findByIdempotencyKey(String idempotencyKey);
+
+    Optional<OrderEntity> findByIdAndOwnerSubject(UUID id, String ownerSubject);
+
+    Page<OrderEntity> findByOwnerSubject(String ownerSubject, Pageable pageable);
+
+    Page<OrderEntity> findByOwnerSubjectAndStatus(String ownerSubject, OrderStatus status, Pageable pageable);
 }

@@ -48,12 +48,14 @@ nav_order: 5
 - `spring.kafka.producer.properties.acks`
 - `spring.kafka.producer.properties.max.in.flight.requests.per.connection`
 - `spring.kafka.consumer.properties.isolation.level`
-- `app.kafka.processing-delay-ms`
-- `app.kafka.processing-delay-multiplier`
-- `app.kafka.processing-delay-max-ms`
-- `app.kafka.delayed-processing-attempts`
+- `app.kafka.consumer-retry-attempts`
+- `app.kafka.consumer-retry-delay-ms`
 - `app.kafka.publisher.circuit-breaker.failure-threshold`
 - `app.kafka.publisher.circuit-breaker.open-seconds`
+
+### Scheduled order promotion
+
+- `app.scheduling.pending-to-processing-ms` — fixed-rate interval for the background job that transitions `PENDING` → `PROCESSING` (default five minutes). This is separate from Kafka consumption.
 
 ### Multi-region and idempotency controls
 
@@ -94,7 +96,7 @@ nav_order: 5
 - passive mode blocks writes but does not block reads
 - outbox retry ceiling and backoff strongly influence event freshness
 - adaptive retry classification influences reattempt pressure and terminalization rates
-- delayed consumer processing settings influence order progression latency
+- scheduler interval (`app.scheduling.pending-to-processing-ms`) bounds how soon bulk `PENDING` orders move to `PROCESSING`; Kafka consumer retry settings affect only event acknowledgment, not that promotion cadence
 - `read_committed` consumer mode avoids uncommitted transactional records
 - backpressure thresholds directly impact write admission and dynamic throttling
 - `app.query.list-max-rows` bounds legacy list responses to avoid accidental full-result scans

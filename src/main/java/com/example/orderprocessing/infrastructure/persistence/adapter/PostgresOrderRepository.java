@@ -103,6 +103,21 @@ public class PostgresOrderRepository implements OrderRepository {
         return repository.findByIdempotencyKey(idempotencyKey).map(this::toRecord);
     }
 
+    @Override
+    public Optional<OrderRecord> findByIdAndOwnerSubject(UUID id, String ownerSubject) {
+        return repository.findByIdAndOwnerSubject(id, ownerSubject).map(this::toRecord);
+    }
+
+    @Override
+    public Page<OrderRecord> findByOwnerSubject(String ownerSubject, Pageable pageable) {
+        return repository.findByOwnerSubject(ownerSubject, pageable).map(this::toRecord);
+    }
+
+    @Override
+    public Page<OrderRecord> findByOwnerSubjectAndStatus(String ownerSubject, OrderStatus status, Pageable pageable) {
+        return repository.findByOwnerSubjectAndStatus(ownerSubject, status, pageable).map(this::toRecord);
+    }
+
     private OrderRecord toRecord(OrderEntity entity) {
         List<OrderItemRecord> items = entity.getItems().stream()
                 .map(i -> new OrderItemRecord(i.getProductName(), i.getQuantity(), i.getPrice()))
@@ -113,6 +128,7 @@ public class PostgresOrderRepository implements OrderRepository {
                 entity.getStatus(),
                 entity.getCreatedAt(),
                 entity.getIdempotencyKey(),
+                entity.getOwnerSubject(),
                 entity.getRegionId(),
                 entity.getLastUpdatedTimestamp(),
                 items);
@@ -125,6 +141,7 @@ public class PostgresOrderRepository implements OrderRepository {
         entity.setStatus(record.status());
         entity.setCreatedAt(record.createdAt());
         entity.setIdempotencyKey(record.idempotencyKey());
+        entity.setOwnerSubject(record.ownerSubject());
         entity.setRegionId(record.regionId());
         entity.setLastUpdatedTimestamp(record.lastUpdatedTimestamp());
         List<OrderItemEmbeddable> items = record.items().stream().map(item -> {

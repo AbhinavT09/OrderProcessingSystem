@@ -4,6 +4,7 @@ import com.example.orderprocessing.interfaces.http.dto.CreateOrderRequest;
 import com.example.orderprocessing.interfaces.http.dto.OrderResponse;
 import com.example.orderprocessing.application.event.OrderCreatedEvent;
 import com.example.orderprocessing.application.exception.ConflictException;
+import com.example.orderprocessing.application.exception.ForbiddenException;
 import com.example.orderprocessing.application.exception.InfrastructureException;
 import com.example.orderprocessing.application.exception.NotFoundException;
 import com.example.orderprocessing.application.port.CacheProvider;
@@ -29,6 +30,7 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -54,6 +56,7 @@ public class OrderService {
     private final GlobalIdempotencyService globalIdempotencyService;
     private final RegionalConsistencyManager regionalConsistencyManager;
     private final BackpressureManager backpressureManager;
+    private final TransactionTemplate transactionTemplate;
     private final Counter createCounter;
     private final Counter requestCounter;
     private final Counter idempotentHitCounter;
@@ -69,6 +72,7 @@ public class OrderService {
      * @param meterRegistry metrics registry
      * @param regionalFailoverManager region write-gating controller
      * @param globalIdempotencyService cross-region idempotency coordinator
+     * @param transactionTemplate per-order transactions for scheduled promotion sweeps
      */
     public OrderService(OrderRepository orderRepository,
                         CacheProvider cacheProvider,
@@ -77,6 +81,7 @@ public class OrderService {
                         GlobalIdempotencyService globalIdempotencyService,
                         RegionalConsistencyManager regionalConsistencyManager,
                         BackpressureManager backpressureManager,
+                        TransactionTemplate transactionTemplate,
                         MeterRegistry meterRegistry) {
         this.orderRepository = orderRepository;
         this.cacheProvider = cacheProvider;
@@ -85,6 +90,7 @@ public class OrderService {
         this.globalIdempotencyService = globalIdempotencyService;
         this.regionalConsistencyManager = regionalConsistencyManager;
         this.backpressureManager = backpressureManager;
+        this.transactionTemplate = transactionTemplate;
         this.requestCounter = meterRegistry.counter("orders.service.request.count");
         this.createCounter = meterRegistry.counter("orders.created.count");
         this.idempotentHitCounter = meterRegistry.counter("orders.idempotency.hit.count");
@@ -113,12 +119,16 @@ public class OrderService {
      *
      * @param request validated create-order payload from interface layer
      * @param idempotencyKey optional idempotency key from request header
+     * @param ownerSubject authenticated principal id (e.g. JWT {@code sub}) to bind ownership
      * @return created or previously completed order response
      */
-    public OrderResponse createOrder(CreateOrderRequest request, String idempotencyKey) {
+    public OrderResponse createOrder(CreateOrderRequest request, String idempotencyKey, String ownerSubject) {
         assertWriteAllowed();
         requestCounter.increment();
         return operationTimer.record(() -> {
+            if (ownerSubject == null || ownerSubject.isBlank()) {
+                throw new IllegalArgumentException("Owner subject is required to create an order");
+            }
             String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
 
             if (normalizedIdempotencyKey != null) {
@@ -162,7 +172,7 @@ public class OrderService {
                 }
             }
 
-            Order order = Order.create(mapper.toDomainItems(request.items()), normalizedIdempotencyKey);
+            Order order = Order.create(mapper.toDomainItems(request.items()), normalizedIdempotencyKey, ownerSubject);
 
             try {
                 OrderRecord toSave = stampRegionMetadata(order, null);
@@ -175,7 +185,7 @@ public class OrderService {
                         saved.id().toString(),
                         Instant.now().toString());
                 outboxService.enqueueOrderCreated(saved.id().toString(), createdEvent);
-                invalidateStatusCaches();
+                invalidateOrderCaches(saved);
                 markGlobalIdempotencyCompletedAfterCommit(normalizedIdempotencyKey, saved.id());
 
                 createCounter.increment();
@@ -228,7 +238,7 @@ public class OrderService {
                     try {
                         OrderRecord toSave = stampRegionMetadata(order, entity);
                         OrderRecord saved = orderRepository.save(toSave);
-                        invalidateOrderCaches(saved.id());
+                        invalidateOrderCaches(saved);
                         log.info("Order status updated orderId={} from={} to={} version={}",
                                 id, previous, status, saved.version());
                         return mapper.toResponse(mapper.toDomain(saved));
@@ -254,9 +264,11 @@ public class OrderService {
      * invalidates cached read models after persistence succeeds.</p>
      *
      * @param id order identifier
+     * @param callerSubject authenticated principal id (e.g. JWT {@code sub})
+     * @param callerIsAdmin when true, cancellation is allowed regardless of {@link OrderRecord#ownerSubject()}
      * @return cancelled order response
      */
-    public OrderResponse cancel(UUID id) {
+    public OrderResponse cancel(UUID id, String callerSubject, boolean callerIsAdmin) {
         assertWriteAllowed();
         requestCounter.increment();
         return operationTimer.record(() -> {
@@ -266,6 +278,7 @@ public class OrderService {
                 while (attempts < 2) {
                     attempts++;
                     OrderRecord existing = findEntity(id);
+                    assertCancelAllowed(existing, callerSubject, callerIsAdmin);
                     Order order = mapper.toDomain(existing);
                     if (!regionalConsistencyManager.shouldApplyIncomingUpdate(
                             existing,
@@ -278,7 +291,7 @@ public class OrderService {
                     try {
                         OrderRecord toSave = stampRegionMetadata(order, existing);
                         OrderRecord saved = orderRepository.save(toSave);
-                        invalidateOrderCaches(saved.id());
+                        invalidateOrderCaches(saved);
                         log.info("Order cancelled orderId={} version={}", id, saved.version());
                         return mapper.toResponse(mapper.toDomain(saved));
                     } catch (ObjectOptimisticLockingFailureException ex) {
@@ -295,19 +308,100 @@ public class OrderService {
         });
     }
 
+    private void assertCancelAllowed(OrderRecord existing, String callerSubject, boolean callerIsAdmin) {
+        if (callerIsAdmin) {
+            return;
+        }
+        String owner = existing.ownerSubject();
+        if (owner == null || owner.isBlank()) {
+            throw new ForbiddenException("Order has no recorded owner; cancellation requires administrator");
+        }
+        if (!owner.equals(callerSubject)) {
+            throw new ForbiddenException("Cannot cancel an order placed by another user");
+        }
+    }
+
+    /**
+     * Promotes every order currently in {@code PENDING} to {@code PROCESSING}, one transaction per order.
+     *
+     * <p>Invoked on a fixed interval by {@link com.example.orderprocessing.infrastructure.scheduling.PendingToProcessingScheduler}
+     * (default every five minutes). Kafka {@code ORDER_CREATED} consumption does not perform this transition.</p>
+     */
+    public void promotePendingOrdersScheduled() {
+        assertWriteAllowed();
+        List<OrderRecord> pending = orderRepository.findByStatus(OrderStatus.PENDING);
+        if (pending.isEmpty()) {
+            return;
+        }
+        log.info("Scheduled PENDING→PROCESSING sweep starting count={}", pending.size());
+        for (OrderRecord snapshot : pending) {
+            try {
+                transactionTemplate.executeWithoutResult(status -> promotePendingSingle(snapshot.id()));
+            } catch (ObjectOptimisticLockingFailureException ex) {
+                log.warn("Optimistic lock during scheduled promotion orderId={}", snapshot.id(), ex);
+            }
+        }
+    }
+
+    private void promotePendingSingle(UUID id) {
+        int attempts = 0;
+        while (attempts < 2) {
+            attempts++;
+            OrderRecord existing = orderRepository.findById(id).orElse(null);
+            if (existing == null) {
+                return;
+            }
+            Order order = mapper.toDomain(existing);
+            if (order.getStatus() != OrderStatus.PENDING) {
+                return;
+            }
+            if (!regionalConsistencyManager.shouldApplyIncomingUpdate(
+                    existing,
+                    regionalConsistencyManager.regionId(),
+                    Instant.now(),
+                    existing.version())) {
+                return;
+            }
+            if (!order.promotePendingToProcessing()) {
+                return;
+            }
+            try {
+                OrderRecord saved = orderRepository.save(stampRegionMetadata(order, existing));
+                invalidateOrderCaches(saved);
+                log.info("Scheduled promotion to PROCESSING orderId={} version={}", id, saved.version());
+                return;
+            } catch (ObjectOptimisticLockingFailureException ex) {
+                if (attempts >= 2) {
+                    throw ex;
+                }
+            }
+        }
+    }
+
     private OrderRecord findEntity(UUID id) {
         return orderRepository.findById(id).orElseThrow(() -> new NotFoundException("Order not found: " + id));
     }
 
-    private void invalidateOrderCaches(UUID orderId) {
-        cacheProvider.evict("order:id:" + orderId);
-        invalidateStatusCaches();
+    private void invalidateOrderCaches(OrderRecord record) {
+        cacheProvider.evict(OrderReadCacheKeys.legacyOrderById(record.id()));
+        cacheProvider.evict(OrderReadCacheKeys.orderByIdAdmin(record.id()));
+        String owner = record.ownerSubject();
+        if (owner != null && !owner.isBlank()) {
+            cacheProvider.evict(OrderReadCacheKeys.orderByIdUser(owner, record.id()));
+        }
+        invalidateStatusCaches(owner);
     }
 
-    private void invalidateStatusCaches() {
-        cacheProvider.evict("orders:status:ALL");
+    private void invalidateStatusCaches(String ownerSubjectForUserScopedLists) {
+        cacheProvider.evict(OrderReadCacheKeys.listByStatusAdmin(null));
         for (OrderStatus status : OrderStatus.values()) {
-            cacheProvider.evict("orders:status:" + status.name());
+            cacheProvider.evict(OrderReadCacheKeys.listByStatusAdmin(status));
+        }
+        if (ownerSubjectForUserScopedLists != null && !ownerSubjectForUserScopedLists.isBlank()) {
+            cacheProvider.evict(OrderReadCacheKeys.listByStatusUser(ownerSubjectForUserScopedLists, null));
+            for (OrderStatus status : OrderStatus.values()) {
+                cacheProvider.evict(OrderReadCacheKeys.listByStatusUser(ownerSubjectForUserScopedLists, status));
+            }
         }
     }
 
@@ -348,6 +442,7 @@ public class OrderService {
                 target.getStatus(),
                 target.getCreatedAt(),
                 target.getIdempotencyKey(),
+                target.getOwnerSubject(),
                 regionalConsistencyManager.regionId(),
                 Instant.now(),
                 target.getItems().stream()

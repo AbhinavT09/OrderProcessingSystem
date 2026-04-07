@@ -6,7 +6,6 @@ import com.example.orderprocessing.application.port.OrderRepository;
 import com.example.orderprocessing.application.port.ProcessedEventRepository;
 import com.example.orderprocessing.application.service.OrderMapper;
 import com.example.orderprocessing.domain.order.Order;
-import com.example.orderprocessing.infrastructure.messaging.DelayedProcessingNotReadyException;
 import com.example.orderprocessing.infrastructure.messaging.RetryableProcessingException;
 import com.example.orderprocessing.infrastructure.messaging.schema.OrderCreatedEventSchemaRegistry;
 import com.example.orderprocessing.infrastructure.resilience.BackpressureManager;
@@ -30,15 +29,15 @@ import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.beans.factory.annotation.Value;
 
 @Component
 /**
  * Infrastructure consumer for {@code ORDER_CREATED} events.
  *
- * <p>Consumes Kafka messages, validates schema, and applies idempotent state progression to the
- * local order aggregate projection. Retries transient failures and routes terminal failures to DLQ
- * for operator investigation.</p>
+ * <p>Consumes Kafka messages, validates schema, and records idempotent {@code processed_events}
+ * markers. Automatic {@code PENDING}→{@code PROCESSING} is performed by
+ * {@link com.example.orderprocessing.infrastructure.scheduling.PendingToProcessingScheduler}, not
+ * by this consumer. Retries transient failures and routes terminal failures to DLQ for investigation.</p>
  *
  * <p><b>Architecture role:</b> infrastructure adapter on the asynchronous read side.</p>
  *
@@ -64,7 +63,6 @@ public class OrderCreatedConsumer {
     private final TransactionTemplate transactionTemplate;
     private final BackpressureManager backpressureManager;
     private final RegionalConsistencyManager regionalConsistencyManager;
-    private final long processingDelayMs;
 
     /**
      * Creates the order-created Kafka consumer.
@@ -80,8 +78,7 @@ public class OrderCreatedConsumer {
                                 MeterRegistry meterRegistry,
                                 TransactionTemplate transactionTemplate,
                                 BackpressureManager backpressureManager,
-                                RegionalConsistencyManager regionalConsistencyManager,
-                                @Value("${app.kafka.processing-delay-ms:300000}") long processingDelayMs) {
+                                RegionalConsistencyManager regionalConsistencyManager) {
         this.schemaRegistry = schemaRegistry;
         this.orderRepository = orderRepository;
         this.processedEventRepository = processedEventRepository;
@@ -96,20 +93,12 @@ public class OrderCreatedConsumer {
                 .register(meterRegistry);
         this.backpressureManager = backpressureManager;
         this.regionalConsistencyManager = regionalConsistencyManager;
-        this.processingDelayMs = Math.max(0L, processingDelayMs);
     }
 
     @RetryableTopic(
-            attempts = "${app.kafka.delayed-processing-attempts:12}",
-            backoff = @Backoff(
-                    delayExpression = "${app.kafka.processing-delay-ms:300000}",
-                    multiplierExpression = "${app.kafka.processing-delay-multiplier:2.0}",
-                    maxDelayExpression = "${app.kafka.processing-delay-max-ms:3600000}"
-            ),
-            include = {
-                    DelayedProcessingNotReadyException.class,
-                    RetryableProcessingException.class
-            },
+            attempts = "${app.kafka.consumer-retry-attempts:5}",
+            backoff = @Backoff(delayExpression = "${app.kafka.consumer-retry-delay-ms:1000}"),
+            include = {RetryableProcessingException.class},
             dltStrategy = DltStrategy.FAIL_ON_ERROR
     )
     @KafkaListener(
@@ -121,7 +110,6 @@ public class OrderCreatedConsumer {
      *
      * <p>Key behaviors:</p>
      * <ul>
-     *   <li>Rejects premature processing when event delay window has not elapsed.</li>
      *   <li>Executes processing transactionally with processed-event dedup marker.</li>
      *   <li>Acknowledges duplicates safely; retries transient DB and timing failures.</li>
      * </ul>
@@ -136,10 +124,6 @@ public class OrderCreatedConsumer {
             long lagMs = Math.max(0, Instant.now().toEpochMilli() - occurredAt.toEpochMilli());
             kafkaLagMsSummary.record(lagMs);
             backpressureManager.recordKafkaLagMs(lagMs);
-            if (Instant.now().isBefore(occurredAt.plusMillis(processingDelayMs))) {
-                throw new DelayedProcessingNotReadyException(
-                        "OrderCreated event is not ready for processing yet: " + event.eventId());
-            }
             processEventInTransaction(event);
             processedCounter.increment();
             acknowledgment.acknowledge();
@@ -157,7 +141,7 @@ public class OrderCreatedConsumer {
             consumeErrorCounter.increment();
             retryCounter.increment();
             throw new RetryableProcessingException("Transient DB failure while processing event", ex);
-        } catch (DelayedProcessingNotReadyException | RetryableProcessingException ex) {
+        } catch (RetryableProcessingException ex) {
             consumeErrorCounter.increment();
             retryCounter.increment();
             throw ex;
@@ -228,15 +212,8 @@ public class OrderCreatedConsumer {
                 persistProcessed(event);
                 return;
             }
-            if (order.promotePendingToProcessing()) {
-                OrderRecord toSave = orderMapper.toRecord(order, entity.get().regionId(), Instant.now());
-                orderRepository.save(toSave);
-                log.info("Processed OrderCreated event; order promoted to PROCESSING orderId={} eventId={}",
-                        event.orderId(), event.eventId());
-            } else {
-                log.info("Order already progressed, skipping transition orderId={} eventId={}",
-                        event.orderId(), event.eventId());
-            }
+            log.info("Acknowledged ORDER_CREATED orderId={} eventId={} status={}; PENDING→PROCESSING is scheduled",
+                    event.orderId(), event.eventId(), order.getStatus());
 
             persistProcessed(event);
         });

@@ -13,6 +13,7 @@ import java.util.UUID;
  * @param status order status
  * @param createdAt creation timestamp
  * @param idempotencyKey optional request idempotency key
+ * @param ownerSubject JWT {@code sub} (or equivalent) of the principal who placed the order; may be null for legacy rows
  * @param regionId active region marker
  * @param lastUpdatedTimestamp conflict-resolution timestamp
  * @param items immutable item snapshot
@@ -23,6 +24,7 @@ public record OrderRecord(
         OrderStatus status,
         Instant createdAt,
         String idempotencyKey,
+        String ownerSubject,
         String regionId,
         Instant lastUpdatedTimestamp,
         List<OrderItemRecord> items) {

@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.core.Authentication;
 
 @RestController
 @Validated
@@ -61,8 +62,9 @@ public class OrderController {
      */
     public OrderResponse create(
             @Valid @RequestBody CreateOrderRequest request,
-            @RequestHeader(name = "X-Idempotency-Key", required = false) @Size(max = 128) String idempotencyKey) {
-        return orderService.createOrder(request, idempotencyKey);
+            @RequestHeader(name = "X-Idempotency-Key", required = false) @Size(max = 128) String idempotencyKey,
+            Authentication authentication) {
+        return orderService.createOrder(request, idempotencyKey, authentication.getName());
     }
 
     @GetMapping("/{id}")
@@ -72,8 +74,8 @@ public class OrderController {
      * @param id order identifier
      * @return materialized order response
      */
-    public OrderResponse getById(@PathVariable UUID id) {
-        return orderQueryService.getById(id);
+    public OrderResponse getById(@PathVariable UUID id, Authentication authentication) {
+        return orderQueryService.getById(id, authentication.getName(), isAdmin(authentication));
     }
 
     @PatchMapping("/{id}/status")
@@ -95,8 +97,10 @@ public class OrderController {
      * @param status optional status filter
      * @return order responses matching filter criteria
      */
-    public List<OrderResponse> list(@RequestParam(required = false) OrderStatus status) {
-        return orderQueryService.list(status);
+    public List<OrderResponse> list(
+            @RequestParam(required = false) OrderStatus status,
+            Authentication authentication) {
+        return orderQueryService.list(status, authentication.getName(), isAdmin(authentication));
     }
 
     @GetMapping("/page")
@@ -111,8 +115,14 @@ public class OrderController {
     public OrderQueryService.PagedOrderResult listPage(
             @RequestParam(required = false) OrderStatus status,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "100") int size) {
-        return orderQueryService.listPage(status, page, size);
+            @RequestParam(defaultValue = "100") int size,
+            Authentication authentication) {
+        return orderQueryService.listPage(status, page, size, authentication.getName(), isAdmin(authentication));
+    }
+
+    private static boolean isAdmin(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
     }
 
     @PatchMapping("/{id}/cancel")
@@ -122,7 +132,7 @@ public class OrderController {
      * @param id order identifier
      * @return cancelled order response when domain rules allow it
      */
-    public OrderResponse cancel(@PathVariable UUID id) {
-        return orderService.cancel(id);
+    public OrderResponse cancel(@PathVariable UUID id, Authentication authentication) {
+        return orderService.cancel(id, authentication.getName(), isAdmin(authentication));
     }
 }

@@ -16,9 +16,10 @@ nav_order: 3
 ### `Order`
 
 - Aggregate root that owns lifecycle transitions and cancellation semantics
+- Carries **`ownerSubject`** (who placed the order; mirrored in persistence as `owner_subject`) for application-level authorization — the domain does not interpret JWTs itself
 - Creation entry points:
-  - `create(...)` for new aggregate construction
-  - `rehydrate(...)` for persistence reconstruction
+  - `create(items, idempotencyKey, ownerSubject)` for new aggregate construction
+  - `rehydrate(..., ownerSubject, ...)` for persistence reconstruction
 - Behavior methods:
   - `updateStatus(...)`
   - `cancel()`

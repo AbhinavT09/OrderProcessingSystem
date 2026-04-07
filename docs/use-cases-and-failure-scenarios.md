@@ -16,9 +16,12 @@ Each use case has:
 
 ## Cross-cutting assumptions
 
-- API examples are representative and may omit auth headers for brevity.
+- **Authentication:** Production clients must send `Authorization: Bearer <JWT>`. Roles `USER` / `ADMIN` come from the token’s `roles` claim.
+- **Ownership:** `POST /orders` stores the JWT **`sub`** as the order owner. **Read** and **cancel** (non-admin) apply to that owner only; see [Security and Authorization](./security-and-authorization.md).
+- API examples below may omit the `Authorization` header for brevity; assume a valid token when reproducing.
 - Error envelopes follow `ApiError` (`code`, `message`, `requestId`, `timestamp`).
 - Async event timing can vary based on retry/backoff configuration.
+- **`PENDING` → `PROCESSING`:** occurs on a **schedule** (default five minutes), not synchronously when the Kafka message is consumed.
 
 ## Use Case 1: Create Order (Idempotent Write)
 
@@ -152,7 +155,7 @@ Expected behavior:
 
 Condition:
 
-- Message arrives too early (before 5-minute delay) or transient DB failure.
+- Transient DB failure during consumer transaction; duplicate delivery handled via `processed_events`.
 
 Expected behavior:
 

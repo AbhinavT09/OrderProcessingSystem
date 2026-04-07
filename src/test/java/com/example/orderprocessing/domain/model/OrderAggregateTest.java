@@ -19,6 +19,7 @@ class OrderAggregateTest {
                 UUID.randomUUID(),
                 Instant.now(),
                 null,
+                null,
                 List.of(new OrderItem("Keyboard", 1, 99.0)),
                 OrderStatus.PENDING,
                 0L);
@@ -36,6 +37,7 @@ class OrderAggregateTest {
                 UUID.randomUUID(),
                 Instant.now(),
                 null,
+                null,
                 List.of(new OrderItem("Mouse", 1, 20.0)),
                 OrderStatus.DELIVERED,
                 0L);
@@ -49,6 +51,7 @@ class OrderAggregateTest {
                 UUID.randomUUID(),
                 Instant.now(),
                 null,
+                null,
                 List.of(new OrderItem("Monitor", 1, 199.0)),
                 OrderStatus.PENDING,
                 0L);
@@ -58,6 +61,7 @@ class OrderAggregateTest {
         Order shipped = Order.rehydrate(
                 UUID.randomUUID(),
                 Instant.now(),
+                null,
                 null,
                 List.of(new OrderItem("Cable", 2, 9.0)),
                 OrderStatus.SHIPPED,
@@ -70,6 +74,7 @@ class OrderAggregateTest {
         Order order = Order.rehydrate(
                 UUID.randomUUID(),
                 Instant.now(),
+                null,
                 null,
                 List.of(new OrderItem("Dock", 1, 49.0)),
                 OrderStatus.PENDING,

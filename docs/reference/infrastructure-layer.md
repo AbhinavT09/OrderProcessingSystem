@@ -24,6 +24,8 @@ Infrastructure implements application ports and hosts all external-system integr
   - Kafka producer adapters
 - `infrastructure/messaging/consumer`
   - Kafka listeners, retry-topic integration, DLT handling
+- `infrastructure/scheduling`
+  - `PendingToProcessingScheduler`: fixed-rate Spring `@Scheduled` job; delegates to `OrderService.promotePendingOrdersScheduled()`
 - `infrastructure/messaging/schema`
   - event schema validation and compatibility rules
 - `infrastructure/cache`
@@ -121,12 +123,11 @@ This sequence is intentionally split so DB atomicity and broker delivery can be 
 ### Consumer path (`OrderCreatedConsumer`)
 
 - parses and validates payload
-- enforces delayed-processing window
-- executes dedupe + transition + marker write transactionally
+- writes `processed_events` dedupe markers transactionally (does **not** perform `PENDING` → `PROCESSING`; that is handled by `PendingToProcessingScheduler` on a configurable fixed rate)
 - uses retry-topic and DLT for failure containment
 - consumes with `read_committed` isolation
 - feeds lag telemetry into backpressure manager
-- applies regional conflict checks before state mutation
+- applies regional conflict checks before acknowledging (no aggregate promotion in this consumer)
 
 #### Consumer idempotency and safety
 

@@ -25,6 +25,7 @@ Structured logging fields include:
 - `http.server.request.latency` (p95, p99)
 - `http.server.request.errors`
 - `http.server.requests.by.region`
+- `api.errors.unexpected` — increments on each **unhandled** exception mapped to HTTP 500 by `GlobalExceptionHandler` (paired with structured `ERROR` log and safe client message)
 
 ### Business and service metrics
 

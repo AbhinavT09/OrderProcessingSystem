@@ -91,6 +91,9 @@ app:
         cooldown-ms: 30000
   query:
     list-max-rows: 1000
+  scheduling:
+    # Automatic PENDING → PROCESSING sweep (matches five-minute requirement)
+    pending-to-processing-ms: 300000
   outbox:
     max-retries: 12
     backoff-base-ms: 1000
@@ -136,10 +139,8 @@ app:
       replication:
         strategy: ${KAFKA_REPLICATION_STRATEGY:mirrormaker2}
         topic-pattern: ${KAFKA_REPLICATION_TOPICS:order.events.*}
-    processing-delay-ms: 300000
-    processing-delay-multiplier: 2.0
-    processing-delay-max-ms: 3600000
-    delayed-processing-attempts: 12
+    consumer-retry-attempts: 5
+    consumer-retry-delay-ms: 1000
     publisher:
       max-retries: 3
       retry-backoff-ms: 300
