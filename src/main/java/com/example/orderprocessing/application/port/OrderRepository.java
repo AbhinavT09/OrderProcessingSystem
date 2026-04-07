@@ -41,7 +41,9 @@ public interface OrderRepository {
      */
     List<OrderRecord> findAll();
     /**
-     * Lists orders by status.
+     * Lists orders by status (unbounded; loads all matches into memory).
+     *
+     * <p>Prefer {@link #findByStatus(OrderStatus, Pageable)} for large sets or scheduled sweeps.</p>
      *
      * @param status status filter
      * @return entities matching requested status

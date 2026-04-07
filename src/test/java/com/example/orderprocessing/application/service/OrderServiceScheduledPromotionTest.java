@@ -72,7 +72,8 @@ class OrderServiceScheduledPromotionTest {
                 regionalConsistencyManager,
                 backpressureManager,
                 new TransactionTemplate(new NoopTransactionManager()),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(),
+                500);
     }
 
     private static OrderRecord buildOrder(UUID id, OrderStatus status) {

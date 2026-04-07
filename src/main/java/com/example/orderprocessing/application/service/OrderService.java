@@ -27,6 +27,9 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -57,6 +60,7 @@ public class OrderService {
     private final RegionalConsistencyManager regionalConsistencyManager;
     private final BackpressureManager backpressureManager;
     private final TransactionTemplate transactionTemplate;
+    private final int pendingPromotionBatchSize;
     private final Counter createCounter;
     private final Counter requestCounter;
     private final Counter idempotentHitCounter;
@@ -73,6 +77,7 @@ public class OrderService {
      * @param regionalFailoverManager region write-gating controller
      * @param globalIdempotencyService cross-region idempotency coordinator
      * @param transactionTemplate per-order transactions for scheduled promotion sweeps
+     * @param pendingPromotionBatchSize max rows loaded per sweep iteration (bounded memory)
      */
     public OrderService(OrderRepository orderRepository,
                         CacheProvider cacheProvider,
@@ -82,7 +87,8 @@ public class OrderService {
                         RegionalConsistencyManager regionalConsistencyManager,
                         BackpressureManager backpressureManager,
                         TransactionTemplate transactionTemplate,
-                        MeterRegistry meterRegistry) {
+                        MeterRegistry meterRegistry,
+                        @Value("${app.scheduling.pending-promotion-batch-size:500}") int pendingPromotionBatchSize) {
         this.orderRepository = orderRepository;
         this.cacheProvider = cacheProvider;
         this.outboxService = outboxService;
@@ -91,6 +97,7 @@ public class OrderService {
         this.regionalConsistencyManager = regionalConsistencyManager;
         this.backpressureManager = backpressureManager;
         this.transactionTemplate = transactionTemplate;
+        this.pendingPromotionBatchSize = Math.max(1, Math.min(pendingPromotionBatchSize, 5000));
         this.requestCounter = meterRegistry.counter("orders.service.request.count");
         this.createCounter = meterRegistry.counter("orders.created.count");
         this.idempotentHitCounter = meterRegistry.counter("orders.idempotency.hit.count");
@@ -322,23 +329,35 @@ public class OrderService {
     }
 
     /**
-     * Promotes every order currently in {@code PENDING} to {@code PROCESSING}, one transaction per order.
+     * Promotes orders in {@code PENDING} to {@code PROCESSING}, one transaction per order.
+     *
+     * <p>Loads work in bounded batches to avoid loading the entire backlog into heap. Each iteration
+     * re-queries page zero so promoted rows drop out without fragile offset pagination.</p>
      *
      * <p>Invoked on a fixed interval by {@link com.example.orderprocessing.infrastructure.scheduling.PendingToProcessingScheduler}
      * (default every five minutes). Kafka {@code ORDER_CREATED} consumption does not perform this transition.</p>
      */
     public void promotePendingOrdersScheduled() {
         assertWriteAllowed();
-        List<OrderRecord> pending = orderRepository.findByStatus(OrderStatus.PENDING);
-        if (pending.isEmpty()) {
-            return;
-        }
-        log.info("Scheduled PENDING→PROCESSING sweep starting count={}", pending.size());
-        for (OrderRecord snapshot : pending) {
-            try {
-                transactionTemplate.executeWithoutResult(status -> promotePendingSingle(snapshot.id()));
-            } catch (ObjectOptimisticLockingFailureException ex) {
-                log.warn("Optimistic lock during scheduled promotion orderId={}", snapshot.id(), ex);
+        boolean loggedStart = false;
+        while (true) {
+            Page<OrderRecord> batch = orderRepository.findByStatus(
+                    OrderStatus.PENDING,
+                    PageRequest.of(0, pendingPromotionBatchSize));
+            if (batch.isEmpty()) {
+                return;
+            }
+            if (!loggedStart) {
+                log.info("Scheduled PENDING→PROCESSING sweep starting (batchSize={} firstBatch={})",
+                        pendingPromotionBatchSize, batch.getNumberOfElements());
+                loggedStart = true;
+            }
+            for (OrderRecord snapshot : batch.getContent()) {
+                try {
+                    transactionTemplate.executeWithoutResult(status -> promotePendingSingle(snapshot.id()));
+                } catch (ObjectOptimisticLockingFailureException ex) {
+                    log.warn("Optimistic lock during scheduled promotion orderId={}", snapshot.id(), ex);
+                }
             }
         }
     }

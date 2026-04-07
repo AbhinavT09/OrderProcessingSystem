@@ -94,6 +94,8 @@ app:
   scheduling:
     # Automatic PENDING → PROCESSING sweep (matches five-minute requirement)
     pending-to-processing-ms: 300000
+    # Bounded rows per sweep iteration (avoids loading entire PENDING backlog into heap)
+    pending-promotion-batch-size: 500
   outbox:
     max-retries: 12
     backoff-base-ms: 1000
@@ -111,6 +113,8 @@ app:
       batch-size: 200
       parallelism: 8
       max-in-flight: 16
+      # Dedicated pool for post-publish DB transitions (offloads Kafka producer I/O threads)
+      db-update-pool-size: 8
       slow-kafka-threshold-ms: 1500
   security:
     jwt-secret: ${JWT_SECRET:change-me-to-a-strong-32-char-secret}

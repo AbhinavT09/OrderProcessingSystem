@@ -53,7 +53,7 @@ Authoritative deep dives (on the live site and in-repo):
   - `IN_PROGRESS` key prevents unsafe duplicate execution
   - completion is recorded after transaction commit
 - Optimistic locking (`@Version`) for concurrent update/cancel safety
-- Regional write gating (`RegionalFailoverManager`) blocks writes when node is passive
+- Regional write gating (`RegionalFailoverManager`) blocks writes when node is passive; **`MultiRegionHealthIndicator`** reports **`OUT_OF_SERVICE`** when passive so load balancers can drain traffic (readiness)
 
 ### Event-driven processing and scheduling
 
@@ -61,9 +61,9 @@ Authoritative deep dives (on the live site and in-repo):
 - Outbox pipeline:
   - `OutboxPublisher` (scheduler/backpressure)
   - `OutboxFetcher` (partition claim)
-  - `OutboxProcessor` (async publish flow)
+  - `OutboxProcessor` (async publish flow; post-send DB updates run on **`outboxDbUpdateExecutor`**, not Kafka producer I/O threads)
   - `OutboxRetryHandler` (retry/backoff policy)
-- **Automatic `PENDING` → `PROCESSING`:** Spring `@Scheduled` in `PendingToProcessingScheduler` on a fixed interval (default **every five minutes**, `app.scheduling.pending-to-processing-ms`). **This is the only automatic promotion path.**
+- **Automatic `PENDING` → `PROCESSING`:** Spring `@Scheduled` in `PendingToProcessingScheduler` on a fixed interval (default **every five minutes**, `app.scheduling.pending-to-processing-ms`). `OrderService` loads candidates in **bounded batches** (`app.scheduling.pending-promotion-batch-size`, default 500) to avoid unbounded heap use. **This is the only automatic promotion path.**
 - Kafka consumer (`OrderCreatedConsumer`):
   - acknowledges `ORDER_CREATED` and writes **processed-event** dedupe markers (at-least-once, idempotent application)
   - does **not** change order status to `PROCESSING`
@@ -116,7 +116,7 @@ src/main/java/com/example/orderprocessing
   application              # command/query services, ports, events, exceptions
   domain/order             # aggregate, statuses, state implementations
   infrastructure           # persistence, messaging, cache, web, security, resilience
-  config                   # runtime/security/redis configuration
+  config                   # transaction, outbox async executor, security, redis
 docs                       # Jekyll site + detailed architecture and operational documentation
 .github/workflows        # CI (test), Pages (doc deploy)
 ```
@@ -127,7 +127,7 @@ docs                       # Jekyll site + detailed architecture and operational
 |--------|------|-------|--------|
 | `POST` | `/orders` | USER, ADMIN | Optional `X-Idempotency-Key`; stores `sub` as owner |
 | `GET` | `/orders/{id}` | USER, ADMIN | Scoped by owner unless ADMIN |
-| `GET` | `/orders` | USER, ADMIN | List bounded; scoped by owner unless ADMIN |
+| `GET` | `/orders` | USER, ADMIN | Optional `?status=`; list bounded; scoped by owner unless ADMIN |
 | `GET` | `/orders/page` | USER, ADMIN | Paginated; same scoping as list |
 | `PATCH` | `/orders/{id}/status` | ADMIN | Optimistic concurrency (`version`) |
 | `PATCH` | `/orders/{id}/cancel` | USER, ADMIN | Domain: `PENDING` only; auth: owner or ADMIN |
@@ -145,7 +145,7 @@ docs                       # Jekyll site + detailed architecture and operational
 
 ```bash
 mvn clean compile
-mvn test
+mvn clean test
 mvn spring-boot:run
 ```
 
@@ -167,12 +167,12 @@ Uses JDK 17 (Temurin) with Maven dependency cache.
 
 Key runtime areas (see [Configuration and Runtime](docs/reference/configuration-and-runtime.md)):
 
-- Outbox polling, partitioning, retry, and retention
-- Scheduler cadence for `PENDING` → `PROCESSING` (`app.scheduling.pending-to-processing-ms`)
+- Outbox polling, partitioning, retry, retention, and **`app.outbox.publisher.db-update-pool-size`** (worker pool for post-publish DB work)
+- Scheduler cadence for `PENDING` → `PROCESSING` (`app.scheduling.pending-to-processing-ms`) and batch size (`app.scheduling.pending-promotion-batch-size`)
 - Kafka topic, consumer group, consumer retry (`app.kafka.consumer-retry-*`), publisher circuit-breaker
 - Cache TTL, **scoped read keys**, and Redis resilience controls
 - Multi-region failover thresholds and idempotency TTL settings
 
 ## Testing and Quality
 
-Coverage includes: domain transitions, idempotency lifecycle, outbox/messaging components, cache/rate-limit behavior, failover controls, API integration (**ownership on GET/list/cancel**, admin overrides), and CI on every mainline push/PR. See [Testing and Quality](docs/testing-and-quality.md) for gaps and expansion ideas.
+CI runs **`mvn -B clean test`** with **JaCoCo** (bundle line coverage check, minimum **0.65**). Suites include domain transitions, idempotency, outbox/messaging, cache/rate limiting, failover, mapper/exception/conflict unit tests, and API integration (**ownership**, list filter, admin status, cancel). See [Testing and Quality](docs/testing-and-quality.md) for details and residual gaps.

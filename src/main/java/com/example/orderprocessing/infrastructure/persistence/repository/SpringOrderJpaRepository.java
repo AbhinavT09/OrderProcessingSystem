@@ -24,13 +24,13 @@ public interface SpringOrderJpaRepository extends JpaRepository<OrderEntity, UUI
      */
     List<OrderEntity> findByStatusOrderByCreatedAtAsc(OrderStatus status);
     /**
-     * Reads one page of orders by status.
+     * Reads one page of orders by status, oldest first (matches bulk sweep ordering).
      *
      * @param status status filter
      * @param pageable page and size constraints
      * @return bounded result page
      */
-    Page<OrderEntity> findByStatus(OrderStatus status, Pageable pageable);
+    Page<OrderEntity> findByStatusOrderByCreatedAtAsc(OrderStatus status, Pageable pageable);
     /**
      * Finds an order by persisted idempotency key.
      *

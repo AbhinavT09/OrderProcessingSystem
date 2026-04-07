@@ -29,8 +29,15 @@ nav_order: 5
   - in-progress duplicate rejection and safe retry
   - completed reuse behavior
   - duplicate prevention under concurrent retries
+- `OrderServiceScheduledPromotionTest`
+  - scheduled `PENDING` → `PROCESSING` sweep (uses bounded repository paging; aligns with `PendingToProcessingScheduler`)
 - `OutboxServiceTest`
   - outbox row creation shape and defaults
+- `OrderMapperTest` — DTO ↔ domain ↔ record mapping
+- `PendingToProcessingSchedulerTest` — delegates to `OrderService`, swallows failures
+- `RegionalConsistencyManagerTest` — write gating delegation, conflict counter
+- `GlobalExceptionHandlerTest` — HTTP status and error codes for main exception types
+- `HybridTimestampTest`, `VersionBasedConflictResolutionStrategyTest` — cross-region ordering
 
 ### Messaging/outbox components
 
@@ -55,12 +62,14 @@ Coverage focus:
 - `RedisCacheProviderTest`
 - `RateLimitingFilterTest`
 - `RegionalFailoverManagerTest`
+- `MultiRegionHealthIndicatorTest` (PASSIVE → `OUT_OF_SERVICE` readiness signal)
 
 Coverage focus:
 
 - cache hit/miss/degraded behavior
 - limiter allow/block with dynamic policy input and fail-open fallback
 - active/passive switching and write gating signals
+- health indicator alignment with passive fencing for orchestrators
 
 ### API integration
 
@@ -69,6 +78,8 @@ Coverage focus:
   - idempotency behavior at HTTP boundary
   - validation and error contract behavior
   - **Read scope:** `404` when fetching another user’s order by id; admin can read any order; list contains only caller’s orders for non-admin
+  - **List filter:** `GET /orders?status=PENDING` returns matching rows for the caller
+  - **Admin status:** `PATCH /orders/{id}/status` with `SHIPPED` (from `PENDING`, version `0`)
   - **Cancel scope:** own order, reject other user (`403`), admin can cancel another user’s order
 
 ## 2.1 Continuous integration
@@ -101,6 +112,7 @@ flowchart TD
 
 ## 5. Residual Gaps / Next Expansion
 
+- scheduler cadence is validated in unit tests and config (`pending-to-processing-ms`); `@SpringBootTest` keeps `spring.task.scheduling.enabled=false` for deterministic integration runs
 - embedded Kafka end-to-end verification (outbox → producer → consumer → dedupe marker)
 - crash-injection integration around outbox lease expiry/reclaim path
 - deterministic active-recovery-to-active integration with controlled dependency health
@@ -109,12 +121,20 @@ flowchart TD
 - dedicated **`GET /orders/page`** contract tests for total count semantics under **owner scoping** (if product requires strict guarantees)
 - ArchUnit / architecture tests for layer boundaries (optional)
 
+## 6. Quality Gates
+
+- `mvn clean compile` must pass; **`mvn clean test`** is enforced on CI for mainline branches
+- **JaCoCo:** `jacoco-maven-plugin` runs on `test` (HTML report under `target/site/jacoco/`); **`check`** enforces a minimum **line coverage ratio of 0.65** on the whole bundle (see HTML report for per-package gaps)
+- targeted reliability suites should pass before broad runs
+- API, idempotency, and **authorization (read/cancel)** regression tests are mandatory for changes touching `OrderService`, `OrderQueryService`, or security
+
 ## 7. Principal Reliability Test Matrix
 
 ### P0 contract scenarios
 
 - stale callback rejection: old lease owner/version must fail state transition after reclaim
 - async completion bounding: configured in-flight publish cap must hold under slow broker acks
+- post-publish DB work must not block Kafka producer I/O threads (`outboxDbUpdateExecutor`)
 - listener liveness: consumer retry path must not block poll loop threads
 
 ### P1/P2 operational scenarios
@@ -122,10 +142,4 @@ flowchart TD
 - bounded list behavior at high data volume for `/orders` and `/orders/page`
 - backpressure transition correctness (`NORMAL` -> `ELEVATED` -> `CRITICAL`) and write gating
 - DLQ growth alerts and replay readiness validation
-
-## 6. Quality Gates
-
-- `mvn clean compile` must pass; **`mvn clean test`** is enforced on CI for mainline branches
-- targeted reliability suites should pass before broad runs
-- API, idempotency, and **authorization (read/cancel)** regression tests are mandatory for changes touching `OrderService`, `OrderQueryService`, or security
 

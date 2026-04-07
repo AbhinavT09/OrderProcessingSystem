@@ -302,4 +302,59 @@ class OrderControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].items[0].productName").value("OnlyMineA"));
     }
+
+    @Test
+    void shouldListOrdersFilteredByPendingStatus() throws Exception {
+        String body = """
+                { "items": [ { "productName": "FilteredPending", "quantity": 2, "price": 9.5 } ] }
+                """;
+        MvcResult create = mockMvc.perform(post("/orders")
+                        .with(jwtUser("filter-by-status-user"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-list-filter-pending")
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andReturn();
+
+        String id = objectMapper.readTree(create.getResponse().getContentAsString()).get("id").asText();
+
+        mockMvc.perform(get("/orders").param("status", "PENDING").with(jwtUser("filter-by-status-user")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(id))
+                .andExpect(jsonPath("$[0].status").value("PENDING"))
+                .andExpect(jsonPath("$[0].items[0].productName").value("FilteredPending"));
+    }
+
+    @Test
+    void shouldAllowAdminToAdvanceStatusToShipped() throws Exception {
+        String body = """
+                { "items": [ { "productName": "ShipCandidate", "quantity": 1, "price": 40.0 } ] }
+                """;
+        MvcResult create = mockMvc.perform(post("/orders")
+                        .with(jwtUser("ship-candidate-owner"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "idem-admin-ship-1")
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andReturn();
+
+        String id = objectMapper.readTree(create.getResponse().getContentAsString()).get("id").asText();
+
+        String patchBody = """
+                {
+                  "status": "SHIPPED",
+                  "version": 0
+                }
+                """;
+
+        mockMvc.perform(patch("/orders/{id}/status", id)
+                        .with(jwtAdmin("fulfillment-admin"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(patchBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.status").value("SHIPPED"));
+    }
 }

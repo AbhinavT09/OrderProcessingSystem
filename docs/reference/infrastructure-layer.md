@@ -62,6 +62,7 @@ Infrastructure implements application ports and hosts all external-system integr
   - ordered candidate retrieval
 - `OutboxProcessor`
   - async publication orchestration
+  - success/failure DB transitions run on **`outboxDbUpdateExecutor`** (`whenCompleteAsync`), not on the Kafka producer I/O thread
   - success transition to `SENT`
   - publish latency/rate/lag metrics
 - `OutboxRetryHandler`
@@ -75,8 +76,8 @@ Infrastructure implements application ports and hosts all external-system integr
 2. `OutboxFetcher` claims rows due for retry/publication in a DB transaction.
 3. Claimed rows are marked `IN_FLIGHT` with `leaseOwner` and incremented `leaseVersion`.
 4. `OutboxProcessor` asynchronously publishes to Kafka via `EventPublisher`.
-5. Success callback attempts fenced transition to `SENT`.
-6. Failure callback delegates to `OutboxRetryHandler`, which computes adaptive delay.
+5. On the dedicated **`outboxDbUpdateExecutor`**, the success handler attempts a fenced transition to `SENT` (avoids blocking the producer I/O thread on DB pool contention).
+6. Failure callback delegates to `OutboxRetryHandler`, which computes adaptive delay (same executor path as success).
 7. Retry handler writes fenced `FAILED` transition with `nextAttemptAt`.
 8. Scheduler permit is released only after async completion to avoid hidden in-flight work.
 
@@ -177,6 +178,7 @@ This sequence is intentionally split so DB atomicity and broker delivery can be 
 ### `MultiRegionHealthIndicator`
 
 - exposes current mode and write-eligibility via actuator health
+- when the region is **PASSIVE**, reports **`OUT_OF_SERVICE`** (readiness) so load balancers can drain traffic instead of routing to a node that rejects writes
 
 ## Persistence Infrastructure
 

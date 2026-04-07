@@ -15,6 +15,10 @@ nav_order: 5
 - `config/redis/RedisLettuceConfig`
   - Redis/Lettuce client setup
   - timeout/reconnect/pooling tuning
+- `config/TransactionConfig`
+  - shared `TransactionTemplate` bean for explicit transactional boundaries
+- `config/OutboxAsyncConfig`
+  - `outboxDbUpdateExecutor` (`ThreadPoolTaskExecutor`) for post-Kafka-send outbox DB updates (`app.outbox.publisher.db-update-pool-size`)
 - `config/kafka`
   - package reserved for Kafka-focused runtime wiring
 - `config/observability`
@@ -35,6 +39,7 @@ nav_order: 5
 - `app.outbox.publisher.batch-size`
 - `app.outbox.publisher.parallelism`
 - `app.outbox.publisher.max-in-flight`
+- `app.outbox.publisher.db-update-pool-size` — threads for `OutboxProcessor` completion callbacks (offloads Kafka producer I/O threads)
 - `app.outbox.publisher.slow-kafka-threshold-ms`
 - `app.outbox.cleanup.retention-days`
 - `app.outbox.cleanup.poll-ms`
@@ -56,6 +61,7 @@ nav_order: 5
 ### Scheduled order promotion
 
 - `app.scheduling.pending-to-processing-ms` — fixed-rate interval for the background job that transitions `PENDING` → `PROCESSING` (default five minutes). This is separate from Kafka consumption.
+- `app.scheduling.pending-promotion-batch-size` — max `PENDING` rows loaded per sweep iteration (bounded memory; default 500).
 
 ### Multi-region and idempotency controls
 

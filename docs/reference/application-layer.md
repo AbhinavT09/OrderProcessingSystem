@@ -23,7 +23,7 @@ Application services orchestrate use-cases, transactions, and infrastructure por
 - **Create:** binds **`owner_subject`** from caller (`Order.create(..., ownerSubject)`); rejects blank owner
 - Uses optimistic locking and retry semantics for status/cancel mutations
 - **Cancel:** `assertCancelAllowed` — admins always; non-admins require `owner_subject == caller`; null-owner legacy rows require admin (`ForbiddenException`)
-- **Scheduled promotion:** `promotePendingOrdersScheduled()` loads all `PENDING`, promotes per short transaction; invoked by `PendingToProcessingScheduler`
+- **Scheduled promotion:** `promotePendingOrdersScheduled()` loads `PENDING` orders in **bounded pages** (`findByStatus` + `Pageable`), promotes **one short transaction per order**, looping until no `PENDING` remain; invoked by `PendingToProcessingScheduler`
 - Invalidates read cache via **`OrderReadCacheKeys`** + legacy `order:id:` eviction (see below)
 
 ### `OrderQueryService` (query/read side)

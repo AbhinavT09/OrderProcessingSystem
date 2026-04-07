@@ -155,7 +155,8 @@ class OrderServiceIdempotencyLifecycleTest {
                 regionalConsistencyManager,
                 backpressureManager,
                 new TransactionTemplate(new NoopTransactionManager()),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(),
+                500);
     }
 
     private static final class NoopTransactionManager implements PlatformTransactionManager {

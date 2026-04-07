@@ -122,6 +122,20 @@ public class RegionalFailoverManager {
     }
 
     /**
+     * Whether this JVM is currently in PASSIVE mode (writes blocked by regional policy).
+     *
+     * <p>When multi-region support is disabled, this is always {@code false}.</p>
+     *
+     * @return {@code true} if the node has fenced itself to PASSIVE
+     */
+    public boolean isPassiveRegion() {
+        if (!enabled) {
+            return false;
+        }
+        return nodeState.get() == NodeState.PASSIVE;
+    }
+
+    /**
      * Exposes current failover strategy and node mode for diagnostics.
      *
      * @return mode string in format {@code strategy:state}

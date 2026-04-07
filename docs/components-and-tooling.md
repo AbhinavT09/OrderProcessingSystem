@@ -30,7 +30,7 @@ nav_order: 3
 
 - persistence adapters: JPA-backed implementations of application ports
 - messaging pipeline: outbox scheduler/fetcher/processor/retry + producer/consumer
-- resilience/crosscutting: failover manager, global idempotency coordinator
+- resilience/crosscutting: failover manager, multi-region health indicator (`OUT_OF_SERVICE` when passive), global idempotency coordinator
 - web/security: request context, rate limiting, JWT claim conversion
 
 ## 2. Why These Components Exist

@@ -20,7 +20,7 @@ This document is the **authoritative** description of authentication, roles, res
 |----------|----------------|--------|
 | `POST /orders` | `USER` or `ADMIN` | |
 | `GET /orders/{id}` | `USER` or `ADMIN` | Read scope enforced in application layer (see §4) |
-| `GET /orders` | `USER` or `ADMIN` | Same |
+| `GET /orders` | `USER` or `ADMIN` | Optional `?status=` filter; read scope in application layer (§4) |
 | `GET /orders/page` | `USER` or `ADMIN` | Same |
 | `PATCH /orders/{id}/status` | `ADMIN` only | Operational status changes |
 | `PATCH /orders/{id}/cancel` | `USER` or `ADMIN` | Domain + ownership rules in §5 |

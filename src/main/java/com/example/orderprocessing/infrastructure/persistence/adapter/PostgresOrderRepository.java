@@ -89,7 +89,7 @@ public class PostgresOrderRepository implements OrderRepository {
 
     @Override
     public Page<OrderRecord> findByStatus(OrderStatus status, Pageable pageable) {
-        return repository.findByStatus(status, pageable).map(this::toRecord);
+        return repository.findByStatusOrderByCreatedAtAsc(status, pageable).map(this::toRecord);
     }
 
     @Override

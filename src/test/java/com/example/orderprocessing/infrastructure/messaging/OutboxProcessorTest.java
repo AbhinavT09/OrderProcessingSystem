@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -39,7 +40,7 @@ class OutboxProcessorTest {
         TransactionTemplate tx = new TransactionTemplate(new NoOpTransactionManager());
         SimpleMeterRegistry meter = new SimpleMeterRegistry();
         OutboxProcessor processor = new OutboxProcessor(
-                publisher, repository, schemaRegistry, tx, retryHandler, meter, 16);
+                publisher, repository, schemaRegistry, tx, retryHandler, ForkJoinPool.commonPool(), meter, 16);
 
         OutboxEntity event = outbox("order-1", OutboxStatus.PENDING);
         event.setLeaseOwner("lease-1");
@@ -64,7 +65,7 @@ class OutboxProcessorTest {
         TransactionTemplate tx = new TransactionTemplate(new NoOpTransactionManager());
         SimpleMeterRegistry meter = new SimpleMeterRegistry();
         OutboxProcessor processor = new OutboxProcessor(
-                publisher, repository, schemaRegistry, tx, retryHandler, meter, 16);
+                publisher, repository, schemaRegistry, tx, retryHandler, ForkJoinPool.commonPool(), meter, 16);
 
         OutboxEntity event = outbox("order-2", OutboxStatus.PENDING);
         when(schemaRegistry.deserialize(any())).thenReturn(

@@ -65,7 +65,7 @@ Reason: transactional Kafka producer introduces additional transaction manager b
 
 Reason: separate **integration** (event log + dedupe) from **business scheduling** (when pending work becomes processing).
 
-- **`PendingToProcessingScheduler`:** `@Scheduled` fixed rate; calls `OrderService.promotePendingOrdersScheduled()`; scans `PENDING` rows and promotes per transaction with the same regional checks as writes.
+- **`PendingToProcessingScheduler`:** `@Scheduled` fixed rate; calls `OrderService.promotePendingOrdersScheduled()`; loads `PENDING` rows in **bounded pages** (`app.scheduling.pending-promotion-batch-size`) and promotes **one transaction per order** with the same regional checks as writes (repeated page-0 reads until no pending remain).
 - **`OrderCreatedConsumer`:** validates payload, applies regional gate for **acknowledgment path**, writes `processed_events`; does **not** change lifecycle to `PROCESSING`.
 
 ### 2.7 Resource-level authorization (reads and cancel)

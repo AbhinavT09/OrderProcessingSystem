@@ -14,7 +14,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -40,6 +42,7 @@ public class OutboxProcessor {
     private final OrderCreatedEventSchemaRegistry schemaRegistry;
     private final TransactionTemplate transactionTemplate;
     private final OutboxRetryHandler retryHandler;
+    private final Executor outboxDbUpdateExecutor;
     private final Timer publishLatencyTimer;
     private final DistributionSummary outboxLagSummary;
     private final Counter publishRateCounter;
@@ -49,6 +52,7 @@ public class OutboxProcessor {
      * Creates an outbox batch processor.
      * @param eventPublisher publisher for domain events
      * @param outboxRepository outbox repository for state updates
+     * @param outboxDbUpdateExecutor worker pool for post-send DB updates (offloads Kafka I/O threads)
      * @param meterRegistry metrics registry
      */
     public OutboxProcessor(EventPublisher eventPublisher,
@@ -56,6 +60,7 @@ public class OutboxProcessor {
                            OrderCreatedEventSchemaRegistry schemaRegistry,
                            TransactionTemplate transactionTemplate,
                            OutboxRetryHandler retryHandler,
+                           @Qualifier("outboxDbUpdateExecutor") Executor outboxDbUpdateExecutor,
                            MeterRegistry meterRegistry,
                            @Value("${app.outbox.publisher.max-in-flight:16}") int maxInFlightPublishes) {
         this.eventPublisher = eventPublisher;
@@ -63,6 +68,7 @@ public class OutboxProcessor {
         this.schemaRegistry = schemaRegistry;
         this.transactionTemplate = transactionTemplate;
         this.retryHandler = retryHandler;
+        this.outboxDbUpdateExecutor = outboxDbUpdateExecutor;
         this.publishLatencyTimer = meterRegistry.timer("outbox.publish.latency");
         this.outboxLagSummary = DistributionSummary.builder("outbox.lag").register(meterRegistry);
         this.publishRateCounter = meterRegistry.counter("outbox.publish.rate");
@@ -90,15 +96,18 @@ public class OutboxProcessor {
             OrderCreatedEvent event = parse(outboxEvent.getPayload());
             Timer.Sample sample = Timer.start();
             CompletableFuture<Void> publishFuture = eventPublisher.publishOrderCreated(event);
-            return publishFuture.whenComplete((ignored, ex) -> {
-                sample.stop(publishLatencyTimer);
-                if (ex == null) {
-                    onPublishSuccess(outboxEvent);
-                } else {
-                    retryHandler.handleFailure(outboxEvent, ex);
+            return publishFuture.whenCompleteAsync((ignored, ex) -> {
+                try {
+                    sample.stop(publishLatencyTimer);
+                    if (ex == null) {
+                        onPublishSuccess(outboxEvent);
+                    } else {
+                        retryHandler.handleFailure(outboxEvent, ex);
+                    }
+                } finally {
+                    publishInFlightSemaphore.release();
                 }
-                publishInFlightSemaphore.release();
-            });
+            }, outboxDbUpdateExecutor);
         } catch (RuntimeException ex) {
             publishInFlightSemaphore.release();
             retryHandler.handleFailure(outboxEvent, ex);
