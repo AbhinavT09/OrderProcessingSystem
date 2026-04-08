@@ -1,5 +1,7 @@
 title: Order Processing System Docs
 description: Architecture and implementation guide
+url: "https://abhinavt09.github.io"
+baseurl: "/OrderProcessingSystem"
 
 # Build from docs folder even when Pages is configured for branch/root builds.
 source: docs

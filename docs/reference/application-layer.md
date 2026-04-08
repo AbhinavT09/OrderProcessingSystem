@@ -66,5 +66,5 @@ Application services orchestrate use-cases, transactions, and infrastructure por
 
 ## Related documentation
 
-- [Security and Authorization](../security-and-authorization.md) — end-to-end auth matrix and cache rules
-- [API Layer](./api-layer.md) — HTTP mapping
+- [Security and Authorization]({{ '/security-and-authorization/' | absolute_url }}) — end-to-end auth matrix and cache rules
+- [API Layer]({{ '/reference/api-layer/' | absolute_url }}) — HTTP mapping

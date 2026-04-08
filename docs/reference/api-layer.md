@@ -87,5 +87,5 @@ Interface DTOs are intentionally thin; all invariants are enforced in domain/app
 
 ## Related documentation
 
-- [Security and Authorization](../security-and-authorization.md) — full matrix of roles, ownership, `404` vs `403`, and cache isolation
-- [Application Layer](./application-layer.md) — how `OrderQueryService` / `OrderService` enforce scopes
+- [Security and Authorization]({{ '/security-and-authorization/' | absolute_url }}) — full matrix of roles, ownership, `404` vs `403`, and cache isolation
+- [Application Layer]({{ '/reference/application-layer/' | absolute_url }}) — how `OrderQueryService` / `OrderService` enforce scopes

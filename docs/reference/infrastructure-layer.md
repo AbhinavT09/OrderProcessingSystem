@@ -242,17 +242,19 @@ This sequence is intentionally split so DB atomicity and broker delivery can be 
 
 ## Detailed Runtime Flows
 
-### Adaptive retry decision path
+### Adaptive retry decision path (outbox publish failures)
+
+`OutboxRetryHandler` uses `AdaptiveRetryPolicyStrategy`. The Kafka **consumer** does **not** use this stack; it uses **`@RetryableTopic`** and a **DLT** handler instead.
 
 ```mermaid
 flowchart TD
-    HF[Outbox/Consumer failure] --> STRAT[AdaptiveRetryPolicyStrategy]
+    HF[Outbox publish failure] --> STRAT[AdaptiveRetryPolicyStrategy]
     STRAT --> FC[Classify failure type]
     FC --> C1[TRANSIENT]
     FC --> C2[SEMI_TRANSIENT]
     FC --> C3[PERMANENT]
-    C1 --> D1[Compute delay using retries + load]
-    C2 --> D2[Compute delay using retries + load]
+    C1 --> D1[Compute delay using retries + BackpressureManager.throttlingFactor]
+    C2 --> D2[Compute delay using retries + BackpressureManager.throttlingFactor]
     C3 --> T[Terminal fail path]
     D1 --> J1[Apply jitter + max cap]
     D2 --> J2[Apply jitter + max cap]
@@ -263,22 +265,42 @@ flowchart TD
 
 ### Active-active conflict guard
 
+`RegionalConsistencyManager.shouldApplyIncomingUpdate` delegates to `ConflictResolutionStrategy` (implemented by `VersionBasedConflictResolutionStrategy` using `HybridTimestamp`).
+
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Service as OrderService/Consumer
+    participant OS as OrderService (cancel / promote / …)
     participant RCM as RegionalConsistencyManager
     participant CRS as ConflictResolutionStrategy
     participant Repo as OrderRepository
 
-    Service->>Repo: load current order state
-    Service->>RCM: shouldApplyIncomingUpdate(...)
+    OS->>Repo: load current order state
+    OS->>RCM: shouldApplyIncomingUpdate(...)
     RCM->>CRS: evaluate(current, incomingRegion, incomingTs, incomingVersion)
-    alt accepted
-        Service->>Repo: save update with regionId + lastUpdatedTimestamp
+    alt accepted for command path
+        OS->>Repo: save aggregate (regionId + lastUpdatedTimestamp)
     else rejected
-        RCM-->>Service: reject stale/conflicting update
+        RCM-->>OS: false → ConflictException or skip work
     end
+```
+
+`OrderCreatedConsumer` also calls `shouldApplyIncomingUpdate` before recording dedupe, but it **does not** persist an order mutation on success—only **`processed_events`** (`persistProcessed`).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant KC as OrderCreatedConsumer
+    participant RCM as RegionalConsistencyManager
+    participant PR as ProcessedEventRepository
+
+    KC->>RCM: shouldApplyIncomingUpdate (stale event guard)
+    alt skip as stale
+        KC->>PR: persistProcessed still (dedupe advance)
+    else ok
+        KC->>PR: persistProcessed
+    end
+    Note over KC: No orderRepository.save on consume path
 ```
 
 ## Key Metrics by Infrastructure Area

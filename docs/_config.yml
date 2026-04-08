@@ -1,5 +1,8 @@
 title: Order Processing System Docs
 description: Architecture and implementation guide
+# GitHub Pages site (project page): https://abhinavt09.github.io/OrderProcessingSystem/
+url: "https://abhinavt09.github.io"
+baseurl: "/OrderProcessingSystem"
 markdown: kramdown
 remote_theme: just-the-docs/just-the-docs
 color_scheme: light
@@ -24,7 +27,7 @@ custom_css:
 
 aux_links:
   "View Repository":
-    - "https://github.com/"
+    - "https://github.com/AbhinavT09/OrderProcessingSystem"
 
 nav_sort: case_insensitive
 nav_fold: true
@@ -38,7 +41,7 @@ kramdown:
 
 nav_external_links:
   - title: GitHub Repository
-    url: https://github.com/
+    url: https://github.com/AbhinavT09/OrderProcessingSystem
     hide_icon: false
 
 defaults:

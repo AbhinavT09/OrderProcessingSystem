@@ -23,7 +23,7 @@ This documentation describes the current implementation: transactional outbox, *
 - **Read performance:** cache-aside query service + stampede coalescing + Redis circuit-breaker; **admin vs owner-scoped cache keys** (`OrderReadCacheKeys`)
 - **Read authorization:** non-admins scoped by `owner_subject` on get/list/page; cross-tenant get → `404`
 - **Resilience:** active/passive failover + active-active consistency conflict checks + system-wide backpressure
-- **Security:** JWT resource server + RBAC + resource-level rules ([Security and Authorization](./security-and-authorization.md))
+- **Security:** JWT resource server + RBAC + resource-level rules ([Security and Authorization]({{ '/security-and-authorization/' | absolute_url }}))
 - **Observability:** Micrometer metrics (including `api.errors.unexpected`), structured logs, tracing hooks
 - **CI:** GitHub Actions `mvn clean test` on push/PR to mainline branches (see repository `.github/workflows/ci.yml`)
 
@@ -33,8 +33,16 @@ This documentation describes the current implementation: transactional outbox, *
 
 ```mermaid
 flowchart LR
-    Client[API Client] --> SEC[Security Chain]
-    SEC --> API[interfaces/http/controller/OrderController]
+    subgraph admission [HTTP admission matches SecurityFilterChain order]
+      direction LR
+      RC[RequestContextFilter] --> BEAR[BearerTokenAuthenticationFilter]
+      BEAR --> RL[RateLimitingFilter]
+      RL --> AUTHZ[AuthorizationFilter URL rules]
+      AUTHZ --> API[interfaces/http/controller/OrderController]
+    end
+
+    Client[API Client] --> RC
+
     API --> WS[application/service/OrderService]
     API --> QS[application/service/OrderQueryService]
 
@@ -67,10 +75,6 @@ flowchart LR
     CP --> RCP[infrastructure/cache/RedisCacheProvider]
     RCP --> REDIS[(Redis)]
 
-    SEC --> RL[infrastructure/web/RateLimitingFilter]
-    SEC --> RC[infrastructure/web/RequestContextFilter]
-    SEC --> JWT[config/security/SecurityConfig]
-
     WS --> GID[infrastructure/crosscutting/GlobalIdempotencyService]
     WS --> RCM[infrastructure/resilience/RegionalConsistencyManager]
     WS --> BPM[infrastructure/resilience/BackpressureManager]
@@ -78,11 +82,13 @@ flowchart LR
     RPP --> REDIS
     RPP --> BPM
     KC --> BPM
-    PROC --> RPS[infrastructure/messaging/retry/RetryPolicyStrategy]
-    KC --> RPS
+    PROC --> RPS[infrastructure/messaging/retry/AdaptiveRetryPolicyStrategy]
+    KC --> SKR[Spring Kafka @RetryableTopic + DLT]
     RCM --> RFM[infrastructure/resilience/RegionalFailoverManager]
     RCM --> CRS[infrastructure/resilience/conflict/ConflictResolutionStrategy]
 ```
+
+**Notes:** `RequestContextFilter` is a separate `@Component` servlet filter (ordering is Spring Boot’s default; it usually runs **before** `DelegatingFilterProxy` / `SecurityFilterChain`). In `SecurityConfig`, **`RateLimitingFilter` is registered immediately after** `BearerTokenAuthenticationFilter`—that **adjacency** is what the diagram emphasizes; other framework filters (including **`AuthorizationFilter`** for `authorizeHttpRequests`) sit **later** in the same chain before the dispatcher reaches `OrderController`. Outbox publish failures use `AdaptiveRetryPolicyStrategy` / `OutboxRetryHandler`; the Kafka **consumer** uses **`@RetryableTopic`** and **DLT**, not `RetryPolicyStrategy`.
 
 ### Order State Lifecycle
 
@@ -113,16 +119,22 @@ sequenceDiagram
     participant DB as Orders DB
     participant O as Outbox DB
 
-    C->>OS: POST /orders + X-Idempotency-Key
-    OS->>G: resolveState(key)
-    alt COMPLETED
-      OS-->>C: return existing order
+    Note over C, O: Preconditions: JWT auth + rate limit + USER/ADMIN (controller); then assertWriteAllowed()
+
+    C->>OS: createOrder (via OrderController)
+    OS->>OS: assertWriteAllowed (region + backpressure)
+    OS->>G: resolveState(key) / markInProgress (if key)
+    opt DB dedupe by idempotency key after Redis reservation
+      OS->>DB: findByIdempotencyKey — return existing if found
+    end
+    alt COMPLETED in Redis
+      OS->>DB: findById(orderId) → return existing
+      OS-->>C: 201 + body
     else IN_PROGRESS
-      OS-->>C: conflict/retryable response
-    else ABSENT
-      OS->>G: markInProgress(key)
-      OS->>DB: save order
-      OS->>O: save outbox row
+      OS-->>C: 409 CONFLICT
+    else proceed to create
+      OS->>G: markInProgress when ABSENT
+      OS->>DB: save order + outbox row (one transaction)
       OS-->>C: 201 Created
       OS->>G: afterCommit markCompleted(key, orderId)
     end
@@ -132,7 +144,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    PF[Publish Failure] --> RP[RetryPolicyStrategy.plan]
+    PF[Publish Failure] --> RP[AdaptiveRetryPolicyStrategy.plan]
     RP --> CLS{Classification}
     CLS -->|TRANSIENT| TD1[Short adaptive delay]
     CLS -->|SEMI_TRANSIENT| TD2[Medium adaptive delay]
@@ -155,12 +167,15 @@ flowchart TD
 sequenceDiagram
     autonumber
     participant Client
+    participant JWT as BearerTokenAuthenticationFilter
     participant Filter as RateLimitingFilter
     participant Provider as RedisBackedRateLimitPolicyProvider
     participant Redis
     participant BP as BackpressureManager
 
-    Client->>Filter: HTTP request
+    Client->>JWT: HTTP request (Bearer after authn for API routes)
+    JWT->>JWT: Validate JWT, set SecurityContext
+    JWT->>Filter: addFilterAfter: chain continues
     Filter->>Provider: resolve(request)
     Provider->>Redis: policy config read (cached)
     Provider->>BP: throttlingFactor()
@@ -184,30 +199,33 @@ flowchart LR
     ODB[(outbox_events backlog)] --> BPM
     DBP[(DB pool utilization)] --> BPM
     BPM --> LVL{Level}
-    LVL -->|NORMAL| N1[No throttling]
-    LVL -->|ELEVATED| N2[Tighten rate policies]
-    LVL -->|CRITICAL| N3[Reject write requests]
-    N2 --> RL[RateLimitingFilter]
-    N3 --> OS[OrderService write path]
+    LVL -->|NORMAL| N1[throttlingFactor 1.0]
+    LVL -->|ELEVATED| N2[Tighten rate policies via throttlingFactor]
+    LVL -->|CRITICAL| N3[shouldRejectWrites + lowest throttlingFactor]
+    N2 --> RL[RateLimitingFilter policy resolution]
+    N3 --> OS[OrderService.assertWriteAllowed]
 ```
 
 ## Documentation Structure
 
+Cross-links below use Jekyll’s `absolute_url` filter with `url` and `baseurl` from [`docs/_config.yml`](https://github.com/AbhinavT09/OrderProcessingSystem/blob/main/docs/_config.yml) so the built site on [GitHub Pages](https://abhinavt09.github.io/OrderProcessingSystem/) emits fully qualified URLs. Viewing `.md` on GitHub shows Liquid until the Pages build runs.
+
 ### Core Guides
 
-- [Design and Architecture](./design-and-architecture.md)
-- [Security and Authorization](./security-and-authorization.md)
-- [Components and Tooling](./components-and-tooling.md)
-- [Observability and Operations](./observability-and-operations.md)
-- [Testing and Quality](./testing-and-quality.md)
-- [Use Cases and Failure Scenarios](./use-cases-and-failure-scenarios.md)
+- [Design and Architecture]({{ '/design-and-architecture/' | absolute_url }})
+- [Security and Authorization]({{ '/security-and-authorization/' | absolute_url }})
+- [Components and Tooling]({{ '/components-and-tooling/' | absolute_url }})
+- [Observability and Operations]({{ '/observability-and-operations/' | absolute_url }})
+- [Testing and Quality]({{ '/testing-and-quality/' | absolute_url }})
+- [Use Cases]({{ '/use-cases/' | absolute_url }})
+- [Failure Scenarios]({{ '/failure-scenarios/' | absolute_url }})
 
 ### Layered Reference
 
-- [Reference Index](./reference/index.md)
-- [Interface HTTP Layer](./reference/api-layer.md)
-- [Application Layer](./reference/application-layer.md)
-- [Domain Layer](./reference/domain-layer.md)
-- [Infrastructure Layer](./reference/infrastructure-layer.md)
-- [Configuration and Runtime](./reference/configuration-and-runtime.md)
-- [Folder and Class Reference](./folder-and-class-reference.md)
+- [Reference Index]({{ '/reference/' | absolute_url }})
+- [Interface HTTP Layer]({{ '/reference/api-layer/' | absolute_url }})
+- [Application Layer]({{ '/reference/application-layer/' | absolute_url }})
+- [Domain Layer]({{ '/reference/domain-layer/' | absolute_url }})
+- [Infrastructure Layer]({{ '/reference/infrastructure-layer/' | absolute_url }})
+- [Configuration and Runtime]({{ '/reference/configuration-and-runtime/' | absolute_url }})
+- [Folder and Class Reference]({{ '/folder-and-class-reference/' | absolute_url }})

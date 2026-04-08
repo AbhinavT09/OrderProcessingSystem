@@ -8,15 +8,15 @@ has_children: true
 
 This section is the implementation-level map of packages, classes, and responsibilities.
 
-**See also:** [Security and Authorization](../security-and-authorization.md) (cross-cutting auth and ownership — not limited to HTTP layer).
+**See also:** [Security and Authorization]({{ '/security-and-authorization/' | absolute_url }}) (cross-cutting auth and ownership — not limited to HTTP layer).
 
 ## Layer References
 
-- [Interface HTTP Layer](./api-layer.md)
-- [Application Layer](./application-layer.md)
-- [Domain Layer](./domain-layer.md)
-- [Infrastructure Layer](./infrastructure-layer.md)
-- [Configuration and Runtime Controls](./configuration-and-runtime.md)
+- [Interface HTTP Layer]({{ '/reference/api-layer/' | absolute_url }})
+- [Application Layer]({{ '/reference/application-layer/' | absolute_url }})
+- [Domain Layer]({{ '/reference/domain-layer/' | absolute_url }})
+- [Infrastructure Layer]({{ '/reference/infrastructure-layer/' | absolute_url }})
+- [Configuration and Runtime Controls]({{ '/reference/configuration-and-runtime/' | absolute_url }})
 
 ## How to Use This Section
 

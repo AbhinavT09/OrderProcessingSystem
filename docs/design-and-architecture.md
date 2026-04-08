@@ -74,7 +74,7 @@ Reason: role checks on URLs are insufficient; data must be scoped by **owner**.
 
 - **Create** binds JWT `sub` to `owner_subject`.
 - **Query** uses owner-scoped repository methods and cache keys for non-admins; admins use global queries and admin cache keys.
-- **Cancel** enforces owner match or `ROLE_ADMIN` (see [Security and Authorization](./security-and-authorization.md)).
+- **Cancel** enforces owner match or `ROLE_ADMIN` (see [Security and Authorization]({{ '/security-and-authorization/' | absolute_url }})).
 
 ## 3. Consistency Model
 
@@ -121,7 +121,7 @@ Reason: role checks on URLs are insufficient; data must be scoped by **owner**.
 
 - `GET /orders` executes through a bounded repository page (`app.query.list-max-rows`) to prevent unbounded heap growth
 - `GET /orders/page` provides bounded page reads (`page`, `size`) with status filter support; server caps page size
-- **Authorization:** non-admin callers receive only rows where `owner_subject` matches their JWT `sub`; admins see all (see [Security and Authorization](./security-and-authorization.md))
+- **Authorization:** non-admin callers receive only rows where `owner_subject` matches their JWT `sub`; admins see all (see [Security and Authorization]({{ '/security-and-authorization/' | absolute_url }}))
 
 ## 4.4 Order Creation Idempotency Flow (Detailed)
 
@@ -144,7 +144,8 @@ Detailed sequence:
 
 ```mermaid
 flowchart TD
-    A[POST /orders] --> B[Normalize idempotency key]
+    A[POST /orders] --> AW[assertWriteAllowed: allowsWrites + not shouldRejectWrites]
+    AW --> B[Normalize idempotency key]
     B --> C{Key present?}
     C -- No --> N1[Create aggregate]
     C -- Yes --> D[Resolve Redis idempotency state]
@@ -270,10 +271,10 @@ flowchart LR
     B1[kafka.consumer.lag.ms] --> BM[BackpressureManager]
     B2[outbox.pending + outbox.failed] --> BM
     B3[db.saturation] --> BM
-    BM --> B4{Pressure level}
-    B4 -->|Moderate| B5[Tighten dynamic rate limits]
-    B4 -->|High| B6[Increase retry delays]
-    B4 -->|Critical| B7[Write gating / reject writes]
+    BM --> B4{BackpressureManager.Level}
+    B4 -->|NORMAL| B0[throttlingFactor 1.0; writes allowed]
+    B4 -->|ELEVATED| B5[Tighten rate limits; lower throttlingFactor lengthens AdaptiveRetryPolicyStrategy delays]
+    B4 -->|CRITICAL| B7[shouldRejectWrites + lowest throttlingFactor]
 ```
 
 ## 5.5 Cross-Region HLC Conflict Resolution Flow

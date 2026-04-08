@@ -15,13 +15,13 @@ nav_order: 8
 
 ## Documentation Entry Points
 
-- [Security and Authorization](./security-and-authorization.md) — roles, ownership, read/cancel rules
-- [Reference Index](./reference/index.md)
-- [Interface HTTP Layer](./reference/api-layer.md)
-- [Application Layer](./reference/application-layer.md)
-- [Domain Layer](./reference/domain-layer.md)
-- [Infrastructure Layer](./reference/infrastructure-layer.md)
-- [Configuration and Runtime Controls](./reference/configuration-and-runtime.md)
+- [Security and Authorization]({{ '/security-and-authorization/' | absolute_url }}) — roles, ownership, read/cancel rules
+- [Reference Index]({{ '/reference/' | absolute_url }})
+- [Interface HTTP Layer]({{ '/reference/api-layer/' | absolute_url }})
+- [Application Layer]({{ '/reference/application-layer/' | absolute_url }})
+- [Domain Layer]({{ '/reference/domain-layer/' | absolute_url }})
+- [Infrastructure Layer]({{ '/reference/infrastructure-layer/' | absolute_url }})
+- [Configuration and Runtime Controls]({{ '/reference/configuration-and-runtime/' | absolute_url }})
 
 ## Quick Responsibility Map
 

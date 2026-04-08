@@ -5,7 +5,7 @@ nav_order: 7
 
 # Security and Authorization
 
-This document is the **authoritative** description of authentication, roles, resource ownership, and how API responses avoid information leaks. It complements the [API layer reference](./reference/api-layer.md) and [configuration reference](./reference/configuration-and-runtime.md).
+This document is the **authoritative** description of authentication, roles, resource ownership, and how API responses avoid information leaks. It complements the [API layer reference]({{ '/reference/api-layer/' | absolute_url }}) and [configuration reference]({{ '/reference/configuration-and-runtime/' | absolute_url }}).
 
 ## 1. Authentication
 

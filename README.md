@@ -27,14 +27,14 @@ Production-ready Spring Boot service for reliable e-commerce order processing wi
 |----------|-------------|
 | **GitHub Pages** | Full architecture, operations, reference layers, and failure scenarios — link at top of this file |
 | `docs/` (Jekyll) | Same content as the site; build locally with `bundle exec jekyll serve` from `docs/` if needed |
-| Layer reference | [`docs/reference/`](docs/reference/) — API, application, domain, infrastructure, configuration |
+| Layer reference | [Reference index](https://abhinavt09.github.io/OrderProcessingSystem/reference/) — API, application, domain, infrastructure, configuration |
 
-Authoritative deep dives (on the live site and in-repo):
+Authoritative deep dives (**GitHub Pages**):
 
-- [Design and Architecture](docs/design-and-architecture.md) — outbox, scheduling vs Kafka, consistency
-- [Security and Authorization](docs/security-and-authorization.md) — roles, ownership, cache key isolation, `404` vs `403`
-- [Observability and Operations](docs/observability-and-operations.md) — metrics, logging, alerts
-- [Testing and Quality](docs/testing-and-quality.md) — suites, CI, residual gaps
+- [Design and Architecture](https://abhinavt09.github.io/OrderProcessingSystem/design-and-architecture/) — outbox, scheduling vs Kafka, consistency
+- [Security and Authorization](https://abhinavt09.github.io/OrderProcessingSystem/security-and-authorization/) — roles, ownership, cache key isolation, `404` vs `403`
+- [Observability and Operations](https://abhinavt09.github.io/OrderProcessingSystem/observability-and-operations/) — metrics, logging, alerts
+- [Testing and Quality](https://abhinavt09.github.io/OrderProcessingSystem/testing-and-quality/) — suites, CI, residual gaps
 
 ## Core Features
 
